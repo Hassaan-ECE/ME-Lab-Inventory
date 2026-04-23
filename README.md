@@ -235,7 +235,7 @@ Current packaging notes:
 - output directory: `release/`
 - packaged product name: `ME Lab Inventory Prototype`
 - the database is included through `extraResources`
-- the current build still uses the default Electron icon because no custom `.ico` file has been added yet
+- the app, installer, and executable now use `electron/assets/app_icon.ico`
 
 Typical packaged output:
 

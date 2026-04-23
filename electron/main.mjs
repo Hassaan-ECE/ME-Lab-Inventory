@@ -17,6 +17,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const projectRoot = path.resolve(__dirname, "..");
 const preloadPath = path.join(__dirname, "preload.mjs");
+const appIconPath = path.join(__dirname, "assets", "app_icon.ico");
 const devServerUrl = process.env.VITE_DEV_SERVER_URL;
 
 let mainWindow = null;
@@ -29,6 +30,7 @@ function createMainWindow() {
     minHeight: 720,
     autoHideMenuBar: true,
     backgroundColor: "#0a0a0b",
+    icon: appIconPath,
     title: "ME Lab Inventory Prototype",
     webPreferences: {
       preload: preloadPath,
