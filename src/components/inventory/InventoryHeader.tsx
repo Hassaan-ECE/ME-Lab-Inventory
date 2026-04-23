@@ -1,4 +1,4 @@
-import { DownloadIcon, MoonIcon, PlusIcon, SunIcon, UploadIcon } from "lucide-react";
+import { MoonIcon, PlusIcon, SunIcon, UploadIcon } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -8,7 +8,8 @@ interface InventoryHeaderProps {
   archiveCount: number;
   inventoryCount: number;
   onAddRecord: () => void;
-  onToolbarAction: (label: string) => void;
+  onExportExcel: () => void;
+  onExportHtml: () => void;
   onScopeChange: (scope: InventoryScope) => void;
   onThemeToggle: () => void;
   scope: InventoryScope;
@@ -19,7 +20,8 @@ export function InventoryHeader({
   archiveCount,
   inventoryCount,
   onAddRecord,
-  onToolbarAction,
+  onExportExcel,
+  onExportHtml,
   onScopeChange,
   onThemeToggle,
   scope,
@@ -36,8 +38,8 @@ export function InventoryHeader({
               className={cn(
                 "rounded-xl px-3 py-1.5 text-sm font-medium transition-colors",
                 scope === "inventory"
-                  ? "bg-primary text-primary-foreground"
-                  : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
+                  ? "bg-success/15 text-success-foreground"
+                  : "text-success-foreground/80 hover:bg-success/10 hover:text-success-foreground",
               )}
               type="button"
               onClick={() => onScopeChange("inventory")}
@@ -48,8 +50,8 @@ export function InventoryHeader({
               className={cn(
                 "rounded-xl px-3 py-1.5 text-sm font-medium transition-colors",
                 scope === "archive"
-                  ? "bg-primary text-primary-foreground"
-                  : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
+                  ? "bg-warning/15 text-warning-foreground"
+                  : "text-warning-foreground/80 hover:bg-warning/10 hover:text-warning-foreground",
               )}
               type="button"
               onClick={() => onScopeChange("archive")}
@@ -62,15 +64,12 @@ export function InventoryHeader({
             {theme === "light" ? <MoonIcon className="size-3.5" /> : <SunIcon className="size-3.5" />}
             {theme === "light" ? "Dark Theme" : "Light Theme"}
           </Button>
-          <Button size="sm" variant="outline" onClick={() => onToolbarAction("Import Data")}>
+          <Button size="sm" variant="outline" onClick={onExportExcel}>
             <UploadIcon className="size-3.5" />
-            Import Data
-          </Button>
-          <Button size="sm" variant="outline" onClick={() => onToolbarAction("Export Excel")}>
-            <DownloadIcon className="size-3.5" />
             Export Excel
           </Button>
-          <Button size="sm" variant="outline" onClick={() => onToolbarAction("Export HTML")}>
+          <Button size="sm" variant="outline" onClick={onExportHtml}>
+            <UploadIcon className="size-3.5" />
             Export HTML
           </Button>
           <Button size="sm" onClick={onAddRecord}>

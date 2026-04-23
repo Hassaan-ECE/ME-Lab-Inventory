@@ -10,4 +10,5 @@ contextBridge.exposeInMainWorld("inventoryDesktop", {
   setArchived: (recordId, archived) => ipcRenderer.invoke("inventory:set-archived", recordId, archived),
   deleteRecord: (recordId) => ipcRenderer.invoke("inventory:delete", recordId),
   openExternal: (url) => ipcRenderer.invoke("inventory:open-external", url),
+  exportExcel: () => ipcRenderer.invoke("inventory:export-excel"),
 });

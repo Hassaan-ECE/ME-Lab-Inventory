@@ -14,6 +14,11 @@ declare global {
       setArchived: (recordId: string, archived: boolean) => Promise<InventoryRecord>;
       deleteRecord: (recordId: string) => Promise<{ recordId: string }>;
       openExternal: (url: string) => Promise<boolean>;
+      exportExcel: () => Promise<{
+        canceled: boolean;
+        error?: string;
+        outputPath?: string;
+      }>;
     };
   }
 }

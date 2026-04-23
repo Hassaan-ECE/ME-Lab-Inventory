@@ -1,4 +1,4 @@
-import { ArchiveIcon, CommandIcon, DownloadIcon, PackageIcon, UploadIcon } from "lucide-react";
+import { ArchiveIcon, CommandIcon, PackageIcon, UploadIcon } from "lucide-react";
 
 import { APP_BASE_NAME, APP_STAGE_LABEL, APP_VERSION } from "@/branding";
 import { Badge } from "@/components/ui/badge";
@@ -38,13 +38,9 @@ export function AppSidebar({
           </Badge>
         </div>
 
-        <div className="mt-4 grid grid-cols-2 gap-2">
-          <Button size="sm" variant="outline" onClick={() => onMockAction("Import Data")}>
+        <div className="mt-4">
+          <Button className="w-full" size="sm" variant="outline" onClick={() => onMockAction("Export Excel")}>
             <UploadIcon className="size-3.5" />
-            Import
-          </Button>
-          <Button size="sm" variant="outline" onClick={() => onMockAction("Export Excel")}>
-            <DownloadIcon className="size-3.5" />
             Export
           </Button>
         </div>

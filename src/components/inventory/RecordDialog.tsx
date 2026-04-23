@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState, useSyncExternalStore } from "react";
 import type { Dispatch, FormEvent, ReactNode, SetStateAction } from "react";
 
 import { Badge } from "@/components/ui/badge";
@@ -14,6 +14,8 @@ import {
   type LifecycleStatus,
   type WorkingStatus,
 } from "@/types/inventory";
+
+const LARGE_VIEWPORT_QUERY = "(min-width: 1024px)";
 
 interface RecordDialogProps {
   defaultArchived?: boolean;
@@ -46,6 +48,9 @@ export function RecordDialog({ defaultArchived = false, mode, onClose, onSave, r
   const [form, setForm] = useState<RecordFormState>(() => buildFormState(record, defaultArchived));
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const isLargeViewport = useMediaQuery(LARGE_VIEWPORT_QUERY);
+  const formId = useId();
+  const showsSidebarActions = mode === "edit" && Boolean(record) && isLargeViewport;
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent): void {
@@ -89,8 +94,13 @@ export function RecordDialog({ defaultArchived = false, mode, onClose, onSave, r
       }}
     >
       <div className="flex max-h-[88vh] w-full max-w-[72rem] overflow-hidden rounded-[1.75rem] border border-border/70 bg-card text-card-foreground shadow-2xl">
-        <form className={cn("min-w-0 flex-1 overflow-hidden", mode === "edit" ? "lg:border-r lg:border-border/70" : "")} onSubmit={handleSubmit}>
-          <div className="flex items-center justify-between gap-3 border-b border-border/70 px-5 py-4">
+        <form
+          className={cn("min-w-0 flex flex-1 flex-col overflow-hidden", showsSidebarActions ? "lg:border-r lg:border-border/70" : "")}
+          id={formId}
+          onSubmit={handleSubmit}
+        >
+          <div className="shrink-0 border-b border-border/70 px-5 py-4">
+            <div className="flex items-center justify-between gap-3">
             <div>
               <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
                 {mode === "edit" ? "Open Full Record" : "Add Record"}
@@ -106,8 +116,9 @@ export function RecordDialog({ defaultArchived = false, mode, onClose, onSave, r
               </Badge>
             </div>
           </div>
+          </div>
 
-          <div className="max-h-[calc(88vh-5.5rem)] overflow-y-auto px-5 py-5">
+          <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
             <div className="grid gap-5 lg:grid-cols-2">
               <Field label="Asset Number">
                 <Input
@@ -260,33 +271,36 @@ export function RecordDialog({ defaultArchived = false, mode, onClose, onSave, r
                 Archived record
               </label>
             </div>
-
-            {error ? <p className="mt-4 text-sm text-destructive-foreground">{error}</p> : null}
           </div>
 
-          <div className="flex items-center justify-end gap-2 border-t border-border/70 px-5 py-4">
-            <Button disabled={isSaving} variant="ghost" onClick={onClose}>
-              Cancel
-            </Button>
-            <Button disabled={isSaving} type="submit">
-              {isSaving ? "Saving..." : "Save Record"}
-            </Button>
-          </div>
+          {showsSidebarActions ? null : (
+            <div className="shrink-0 border-t border-border/70 px-5 py-4">
+              <DialogActions error={error} formId={formId} isSaving={isSaving} layout="footer" onClose={onClose} />
+            </div>
+          )}
         </form>
 
-        {mode === "edit" && record ? (
-          <aside className="hidden w-[18rem] shrink-0 flex-col gap-4 bg-background/60 px-5 py-5 lg:flex">
-            <div>
-              <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Record Context</p>
-              <h3 className="mt-1 text-base font-semibold text-foreground">Database Metadata</h3>
+        {showsSidebarActions && record ? (
+          <aside className="flex w-[18rem] shrink-0 flex-col bg-background/60 px-5 py-5">
+            <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Record Context</p>
+                <h3 className="mt-1 text-base font-semibold text-foreground">Database Metadata</h3>
+              </div>
+
+              <div className="mt-4 space-y-4">
+                <ContextRow label="Record ID" value={record.id} />
+                <ContextRow label="Created" value={record.createdAt || "-"} />
+                <ContextRow label="Updated" value={record.updatedAt || "-"} />
+                <ContextRow label="Status" value={record.archived ? "Archived" : "Inventory"} />
+                <ContextRow label="Verified" value={record.verifiedInSurvey ? "Verified" : "Pending"} />
+                <ContextRow label="Manual Entry" value={record.manualEntry ? "Yes" : "No"} />
+              </div>
             </div>
 
-            <ContextRow label="Record ID" value={record.id} />
-            <ContextRow label="Created" value={record.createdAt || "-"} />
-            <ContextRow label="Updated" value={record.updatedAt || "-"} />
-            <ContextRow label="Status" value={record.archived ? "Archived" : "Inventory"} />
-            <ContextRow label="Verified" value={record.verifiedInSurvey ? "Verified" : "Pending"} />
-            <ContextRow label="Manual Entry" value={record.manualEntry ? "Yes" : "No"} />
+            <div className="mt-5 shrink-0 border-t border-border/70 pt-4">
+              <DialogActions error={error} formId={formId} isSaving={isSaving} layout="sidebar" onClose={onClose} />
+            </div>
           </aside>
         ) : null}
       </div>
@@ -321,6 +335,67 @@ function ContextRow({ label, value }: ContextRowProps) {
     <div className="rounded-2xl border border-border/70 bg-card/70 px-3 py-3">
       <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">{label}</p>
       <p className="mt-1 text-sm text-foreground">{value}</p>
+    </div>
+  );
+}
+
+function useMediaQuery(query: string): boolean {
+  return useSyncExternalStore(
+    (onStoreChange) => {
+      if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+        return () => undefined;
+      }
+
+      const mediaQuery = window.matchMedia(query);
+      const handleChange = (): void => onStoreChange();
+      mediaQuery.addEventListener("change", handleChange);
+      return () => mediaQuery.removeEventListener("change", handleChange);
+    },
+    () => {
+      if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+        return false;
+      }
+
+      return window.matchMedia(query).matches;
+    },
+    () => false,
+  );
+}
+
+interface DialogActionsProps {
+  error: string | null;
+  formId: string;
+  isSaving: boolean;
+  layout: "footer" | "sidebar";
+  onClose: () => void;
+}
+
+function DialogActions({ error, formId, isSaving, layout, onClose }: DialogActionsProps) {
+  if (layout === "sidebar") {
+    return (
+      <>
+        {error ? <p className="mb-3 text-sm text-destructive-foreground">{error}</p> : null}
+        <div className="flex flex-col gap-2">
+          <Button className="w-full" disabled={isSaving} variant="ghost" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button className="w-full" disabled={isSaving} form={formId} type="submit">
+            {isSaving ? "Saving..." : "Save Record"}
+          </Button>
+        </div>
+      </>
+    );
+  }
+
+  return (
+    <div className="flex flex-wrap items-center justify-end gap-2">
+      {error ? <p className="mr-auto text-sm text-destructive-foreground">{error}</p> : null}
+      <Button disabled={isSaving} variant="ghost" onClick={onClose}>
+        Cancel
+      </Button>
+      <Button disabled={isSaving} form={formId} type="submit">
+        {isSaving ? "Saving..." : "Save Record"}
+      </Button>
     </div>
   );
 }

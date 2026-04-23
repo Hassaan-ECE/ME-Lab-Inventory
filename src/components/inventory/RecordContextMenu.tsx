@@ -19,6 +19,7 @@ interface RecordContextMenuProps {
 export function RecordContextMenu({ onAction, onClose, position, record, scope }: RecordContextMenuProps) {
   const menuRef = useRef<HTMLDivElement | null>(null);
   const archiveLabel = scope === "archive" || record.archived ? "Restore Record" : "Archive Record";
+  const hasSavedLink = record.links.trim().length > 0;
 
   useEffect(() => {
     function handlePointerDown(event: MouseEvent): void {
@@ -54,14 +55,9 @@ export function RecordContextMenu({ onAction, onClose, position, record, scope }
         className="absolute w-56 rounded-2xl border border-border/70 bg-card p-2 shadow-xl"
         style={{ left: position.x, top: position.y }}
       >
-        <div className="px-2 py-1.5">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Record Actions</p>
-          <p className="mt-1 truncate text-sm font-medium text-foreground">{record.description || record.manufacturer || "Untitled record"}</p>
-        </div>
-
-        <div className="mt-1 space-y-1">
+        <div className="space-y-1">
           <MenuButton label="Open Full Record" onClick={() => onAction("open")} />
-          <MenuButton disabled={!record.links.trim()} label="Open Saved Link" onClick={() => onAction("open-link")} />
+          {hasSavedLink ? <MenuButton label="Open Saved Link" onClick={() => onAction("open-link")} /> : null}
           <MenuButton label="Search Online" onClick={() => onAction("search-online")} />
           <div className="my-1 h-px bg-border/70" />
           <MenuButton label={archiveLabel} onClick={() => onAction("archive-toggle")} />

@@ -16,8 +16,11 @@ describe("InventoryPrototype shell", () => {
     render(<InventoryPrototype />);
 
     expect(screen.getAllByText("ME Lab Inventory")).toHaveLength(1);
+    expect(screen.queryByRole("button", { name: "Import Data" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Export Excel" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Export HTML" })).toBeInTheDocument();
     expect(screen.getByText("Showing all 10 equipment records")).toBeInTheDocument();
-    expect(screen.getByText("Total: 14 | Verified: 8/14 | Import Issues: 0")).toBeInTheDocument();
+    expect(screen.getByText("Total: 14 | Verified: 8/14")).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: /Manufacturer/i })).toBeInTheDocument();
   });
 
@@ -71,6 +74,7 @@ describe("InventoryPrototype shell", () => {
       setArchived: vi.fn().mockResolvedValue(desktopRecords[0]),
       deleteRecord: vi.fn().mockResolvedValue({ recordId: desktopRecords[0].id }),
       openExternal: vi.fn().mockResolvedValue(true),
+      exportExcel: vi.fn().mockResolvedValue({ canceled: false, outputPath: "D:/exports/ME_Lab_Inventory_Export.xlsx" }),
     };
 
     render(<InventoryPrototype />);
@@ -78,7 +82,7 @@ describe("InventoryPrototype shell", () => {
     expect(screen.getByText("Loading inventory records...")).toBeInTheDocument();
     expect(await screen.findByText("Showing all 2 equipment records")).toBeInTheDocument();
     expect(screen.getByText("Bridgeport")).toBeInTheDocument();
-    expect(screen.getByText("Total: 2 | Verified: 1/2 | Import Issues: 0")).toBeInTheDocument();
+    expect(screen.getByText("Total: 2 | Verified: 1/2")).toBeInTheDocument();
   });
 
   it("switches to archive view and updates the summary", async () => {
@@ -128,5 +132,44 @@ describe("InventoryPrototype shell", () => {
 
     await user.click(screen.getByRole("button", { name: /Toggle verified for Stainless socket-head cap screws/i }));
     expect(screen.getByText("Verified state updated locally in the prototype.")).toBeInTheDocument();
+  });
+
+  it("shows the HTML export placeholder message", async () => {
+    const user = userEvent.setup();
+    render(<InventoryPrototype />);
+
+    await user.click(screen.getByRole("button", { name: "Export HTML" }));
+
+    expect(screen.getByText("HTML export is not implemented yet.")).toBeInTheDocument();
+  });
+
+  it("runs desktop Excel export when available", async () => {
+    const user = userEvent.setup();
+    const exportExcel = vi.fn().mockResolvedValue({
+      canceled: false,
+      outputPath: "D:/exports/ME_Lab_Inventory_Export.xlsx",
+    });
+
+    window.inventoryDesktop = {
+      isDesktop: true,
+      loadInventory: vi.fn().mockResolvedValue({
+        dbPath: "D:/coding/IMS_t3code_ref_design/data/me_lab_inventory.db",
+        records: [],
+      }),
+      toggleVerified: vi.fn().mockResolvedValue(null),
+      createRecord: vi.fn().mockResolvedValue(null),
+      updateRecord: vi.fn().mockResolvedValue(null),
+      setArchived: vi.fn().mockResolvedValue(null),
+      deleteRecord: vi.fn().mockResolvedValue({ recordId: "0" }),
+      openExternal: vi.fn().mockResolvedValue(true),
+      exportExcel,
+    };
+
+    render(<InventoryPrototype />);
+
+    await user.click(screen.getByRole("button", { name: "Export Excel" }));
+
+    expect(exportExcel).toHaveBeenCalledTimes(1);
+    expect(await screen.findByText("Excel export completed.")).toBeInTheDocument();
   });
 });

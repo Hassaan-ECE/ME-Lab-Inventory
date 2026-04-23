@@ -1,7 +1,7 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { app, BrowserWindow, ipcMain, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
 
 import {
   createInventoryRecord,
@@ -11,6 +11,7 @@ import {
   toggleVerifiedRecord,
   updateInventoryRecord,
 } from "./inventory-db.mjs";
+import { exportExcelInventory } from "./inventory-export.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -135,6 +136,19 @@ app.whenReady().then(() => {
     ),
   );
   ipcMain.handle("inventory:open-external", (_event, url) => shell.openExternal(url));
+  ipcMain.handle("inventory:export-excel", () =>
+    exportExcelInventory({
+      defaultDirectoryPath: app.getPath("documents"),
+      runtimeContext: {
+        appPath: app.getAppPath(),
+        isPackaged: app.isPackaged,
+        resourcesPath: process.resourcesPath,
+        userDataPath: app.getPath("userData"),
+      },
+      showMessageBox: (options) => dialog.showMessageBox(mainWindow, options),
+      showSaveDialog: (options) => dialog.showSaveDialog(mainWindow, options),
+    }),
+  );
 
   createMainWindow();
 

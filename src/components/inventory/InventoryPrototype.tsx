@@ -129,7 +129,7 @@ export function InventoryPrototype() {
   const visibleColumns = getVisibleColumns(columnVisibility);
   const statusMessage = isLoading
     ? "Loading ME inventory database..."
-    : statusOverride ?? `Total: ${counts.total} | Verified: ${counts.verified}/${counts.total} | Import Issues: 0`;
+    : statusOverride ?? `Total: ${counts.total} | Verified: ${counts.verified}/${counts.total}`;
   const dialogRecord = dialogState?.mode === "edit" ? records.find((record) => record.id === dialogState.recordId) ?? null : null;
   const contextRecord = contextMenu ? records.find((record) => record.id === contextMenu.recordId) ?? null : null;
 
@@ -164,10 +164,6 @@ export function InventoryPrototype() {
     }));
   }
 
-  function handleToolbarAction(label: string): void {
-    announceStatus(`${label} is a visual-only action in the prototype.`);
-  }
-
   function handleAddRecord(): void {
     setContextMenu(null);
     setDialogState({ mode: "add" });
@@ -180,7 +176,8 @@ export function InventoryPrototype() {
 
   function handleOpenContextMenu(recordId: string, clientX: number, clientY: number): void {
     const menuWidth = 240;
-    const menuHeight = 264;
+    const record = records.find((entry) => entry.id === recordId);
+    const menuHeight = record?.links.trim() ? 212 : 172;
     const maxX = typeof window === "undefined" ? clientX : Math.max(12, window.innerWidth - menuWidth - 12);
     const maxY = typeof window === "undefined" ? clientY : Math.max(12, window.innerHeight - menuHeight - 12);
 
@@ -296,6 +293,32 @@ export function InventoryPrototype() {
     announceStatus("Record deleted.");
   }
 
+  async function handleExportExcel(): Promise<void> {
+    if (!window.inventoryDesktop?.exportExcel) {
+      announceStatus("Excel export is only available in the desktop app.");
+      return;
+    }
+
+    try {
+      const result = await window.inventoryDesktop.exportExcel();
+      if (result.canceled) {
+        return;
+      }
+      if (result.error) {
+        announceStatus("Excel export failed.");
+        return;
+      }
+
+      announceStatus("Excel export completed.");
+    } catch {
+      announceStatus("Excel export failed.");
+    }
+  }
+
+  function handleExportHtml(): void {
+    announceStatus("HTML export is not implemented yet.");
+  }
+
   async function handleOpenRecordLink(recordId: string): Promise<void> {
     const record = records.find((entry) => entry.id === recordId);
     if (!record) {
@@ -397,8 +420,11 @@ export function InventoryPrototype() {
           archiveCount={counts.archive}
           inventoryCount={counts.inventory}
           onAddRecord={handleAddRecord}
+          onExportExcel={() => {
+            void handleExportExcel();
+          }}
+          onExportHtml={handleExportHtml}
           onScopeChange={setScope}
-          onToolbarAction={handleToolbarAction}
           onThemeToggle={handleThemeToggle}
           scope={scope}
           theme={theme}

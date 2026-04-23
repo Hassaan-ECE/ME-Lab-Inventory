@@ -1,4 +1,4 @@
-import { DownloadIcon, MoonIcon, SunIcon, UploadIcon } from "lucide-react";
+import { MoonIcon, SunIcon, UploadIcon } from "lucide-react";
 
 import { APP_BASE_NAME } from "@/branding";
 import { Badge } from "@/components/ui/badge";
@@ -49,12 +49,8 @@ export function MobileTopBar({
             {archiveCount}
           </Badge>
         </Button>
-        <Button size="sm" variant="outline" onClick={() => onMockAction("Import Data")}>
-          <UploadIcon className="size-3.5" />
-          Import
-        </Button>
         <Button size="sm" variant="outline" onClick={() => onMockAction("Export Excel")}>
-          <DownloadIcon className="size-3.5" />
+          <UploadIcon className="size-3.5" />
           Export
         </Button>
       </div>
