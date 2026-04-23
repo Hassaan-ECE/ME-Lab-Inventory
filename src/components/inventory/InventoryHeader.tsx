@@ -1,4 +1,5 @@
-import { MoonIcon, PlusIcon, SunIcon, UploadIcon } from "lucide-react";
+import { ChevronDownIcon, FileCodeIcon, FileSpreadsheetIcon, MoonIcon, PlusIcon, SunIcon, UploadIcon } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -6,6 +7,7 @@ import type { InventoryScope, ThemeMode } from "@/types/inventory";
 
 interface InventoryHeaderProps {
   archiveCount: number;
+  canModifyRecords: boolean;
   inventoryCount: number;
   onAddRecord: () => void;
   onExportExcel: () => void;
@@ -18,6 +20,7 @@ interface InventoryHeaderProps {
 
 export function InventoryHeader({
   archiveCount,
+  canModifyRecords,
   inventoryCount,
   onAddRecord,
   onExportExcel,
@@ -27,6 +30,44 @@ export function InventoryHeader({
   scope,
   theme,
 }: InventoryHeaderProps) {
+  const [exportOpen, setExportOpen] = useState(false);
+  const exportMenuRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!exportOpen) {
+      return undefined;
+    }
+
+    function handlePointerDown(event: MouseEvent): void {
+      if (!exportMenuRef.current?.contains(event.target as Node)) {
+        setExportOpen(false);
+      }
+    }
+
+    function handleKeyDown(event: KeyboardEvent): void {
+      if (event.key === "Escape") {
+        setExportOpen(false);
+      }
+    }
+
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [exportOpen]);
+
+  function handleExportExcel(): void {
+    setExportOpen(false);
+    onExportExcel();
+  }
+
+  function handleExportHtml(): void {
+    setExportOpen(false);
+    onExportHtml();
+  }
+
   return (
     <header className="shrink-0 border-b border-border px-3 py-3 sm:px-5">
       <div className="flex flex-wrap items-center gap-3">
@@ -64,15 +105,45 @@ export function InventoryHeader({
             {theme === "light" ? <MoonIcon className="size-3.5" /> : <SunIcon className="size-3.5" />}
             {theme === "light" ? "Dark Theme" : "Light Theme"}
           </Button>
-          <Button size="sm" variant="outline" onClick={onExportExcel}>
-            <UploadIcon className="size-3.5" />
-            Export Excel
-          </Button>
-          <Button size="sm" variant="outline" onClick={onExportHtml}>
-            <UploadIcon className="size-3.5" />
-            Export HTML
-          </Button>
-          <Button size="sm" onClick={onAddRecord}>
+          <div className="relative" ref={exportMenuRef}>
+            <Button
+              aria-expanded={exportOpen}
+              aria-haspopup="menu"
+              size="sm"
+              variant="outline"
+              onClick={() => setExportOpen((current) => !current)}
+            >
+              <UploadIcon className="size-3.5" />
+              Export
+              <ChevronDownIcon className="size-3.5" />
+            </Button>
+            {exportOpen ? (
+              <div
+                className="absolute right-0 z-20 mt-2 w-44 rounded-2xl border border-border/70 bg-card p-2 shadow-lg"
+                role="menu"
+              >
+                <button
+                  className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm text-foreground hover:bg-accent/60"
+                  role="menuitem"
+                  type="button"
+                  onClick={handleExportExcel}
+                >
+                  <FileSpreadsheetIcon className="size-4" />
+                  Excel
+                </button>
+                <button
+                  className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm text-foreground hover:bg-accent/60"
+                  role="menuitem"
+                  type="button"
+                  onClick={handleExportHtml}
+                >
+                  <FileCodeIcon className="size-4" />
+                  HTML
+                </button>
+              </div>
+            ) : null}
+          </div>
+          <Button disabled={!canModifyRecords} size="sm" onClick={onAddRecord}>
             <PlusIcon className="size-3.5" />
             Add Record
           </Button>

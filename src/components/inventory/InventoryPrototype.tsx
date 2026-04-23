@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { ColumnMenu } from "@/components/inventory/ColumnMenu";
 import { EmptyResults } from "@/components/inventory/EmptyResults";
@@ -27,6 +27,7 @@ import type {
   FilterState,
   InventoryRecord,
   InventoryRecordInput,
+  InventorySharedStatus,
   InventoryScope,
   SortState,
   ThemeMode,
@@ -35,6 +36,20 @@ import type {
 const THEME_STORAGE_KEY = "ims.t3.theme";
 const COLOR_ROWS_STORAGE_KEY = "ims.t3.colorRows";
 const COLUMN_VISIBILITY_STORAGE_KEY = "ims.t3.columnVisibility";
+const DEFAULT_SHARED_SYNC_INTERVAL_MS = 10_000;
+const MOCK_SHARED_STATUS: InventorySharedStatus = {
+  available: true,
+  canModify: true,
+  enabled: false,
+  message: "",
+};
+const DESKTOP_SHARED_PENDING_STATUS: InventorySharedStatus = {
+  available: false,
+  canModify: false,
+  enabled: true,
+  message: "Checking shared workspace...",
+  syncIntervalMs: DEFAULT_SHARED_SYNC_INTERVAL_MS,
+};
 
 interface DialogState {
   mode: "add" | "edit";
@@ -59,10 +74,47 @@ export function InventoryPrototype() {
   const [columnVisibility, setColumnVisibility] = useState<Record<ColumnKey, boolean>>(() => readColumnVisibility());
   const [sortState, setSortState] = useState<SortState>({ column: "manufacturer", direction: "asc" });
   const [isLoading, setIsLoading] = useState<boolean>(() => hasDesktopBridge());
+  const [sharedStatus, setSharedStatus] = useState<InventorySharedStatus>(() =>
+    hasDesktopBridge() ? DESKTOP_SHARED_PENDING_STATUS : MOCK_SHARED_STATUS,
+  );
   const [statusOverride, setStatusOverride] = useState<string | null>(null);
   const [dialogState, setDialogState] = useState<DialogState | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const statusTimeoutRef = useRef<number | null>(null);
+
+  const markSharedUnavailable = useCallback((message = "Shared workspace unavailable. Viewing local cache only."): void => {
+    setSharedStatus((current) => ({
+      ...current,
+      available: false,
+      canModify: false,
+      enabled: true,
+      message,
+      syncIntervalMs: current.syncIntervalMs ?? DEFAULT_SHARED_SYNC_INTERVAL_MS,
+    }));
+  }, []);
+
+  const syncRecordsFromDesktop = useCallback(
+    async ({ applyResult = true }: { applyResult?: boolean } = {}): Promise<void> => {
+      if (!window.inventoryDesktop?.syncInventory) {
+        return;
+      }
+
+      try {
+        const payload = await window.inventoryDesktop.syncInventory();
+        if (!applyResult) {
+          return;
+        }
+        setRecords(payload.records);
+        setDataSource("desktop");
+        setSharedStatus(payload.shared);
+      } catch {
+        if (applyResult) {
+          markSharedUnavailable();
+        }
+      }
+    },
+    [markSharedUnavailable],
+  );
 
   useEffect(() => {
     document.documentElement.classList.toggle("dark", theme === "dark");
@@ -99,6 +151,7 @@ export function InventoryPrototype() {
           return;
         }
         setRecords(payload.records);
+        setSharedStatus(payload.shared ?? DESKTOP_SHARED_PENDING_STATUS);
         setDataSource("desktop");
         setStatusOverride(null);
       } catch {
@@ -107,11 +160,16 @@ export function InventoryPrototype() {
         }
         setRecords(MOCK_INVENTORY);
         setDataSource("mock");
+        setSharedStatus(MOCK_SHARED_STATUS);
         announceStatus("Database unavailable. Falling back to bundled mock data.");
       } finally {
         if (active) {
           setIsLoading(false);
         }
+      }
+
+      if (active) {
+        void syncRecordsFromDesktop();
       }
     }
 
@@ -120,16 +178,38 @@ export function InventoryPrototype() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [syncRecordsFromDesktop]);
+
+  useEffect(() => {
+    if (!window.inventoryDesktop?.syncInventory) {
+      return undefined;
+    }
+
+    let active = true;
+    const syncIntervalMs = sharedStatus.syncIntervalMs ?? DEFAULT_SHARED_SYNC_INTERVAL_MS;
+    const intervalId = window.setInterval(() => {
+      void syncRecordsFromDesktop({ applyResult: active });
+    }, syncIntervalMs);
+    const unsubscribe = window.inventoryDesktop.onSharedInventoryChanged?.(() => {
+      void syncRecordsFromDesktop({ applyResult: active });
+    });
+
+    return () => {
+      active = false;
+      window.clearInterval(intervalId);
+      unsubscribe?.();
+    };
+  }, [sharedStatus.syncIntervalMs, syncRecordsFromDesktop]);
 
   const filteredRecords = filterRecords(records, scope, query, filters);
   const sortedRecords = sortRecords(filteredRecords, sortState);
   const counts = getInventoryCounts(records);
+  const canModifyRecords = dataSource !== "desktop" || sharedStatus.canModify;
   const resultsLabel = isLoading ? "Loading inventory records..." : buildResultsLabel(sortedRecords.length, scope, query, filters);
   const visibleColumns = getVisibleColumns(columnVisibility);
   const statusMessage = isLoading
     ? "Loading ME inventory database..."
-    : statusOverride ?? `Total: ${counts.total} | Verified: ${counts.verified}/${counts.total}`;
+    : statusOverride ?? buildDefaultStatusMessage(counts.total, counts.verified, dataSource, sharedStatus);
   const dialogRecord = dialogState?.mode === "edit" ? records.find((record) => record.id === dialogState.recordId) ?? null : null;
   const contextRecord = contextMenu ? records.find((record) => record.id === contextMenu.recordId) ?? null : null;
 
@@ -143,6 +223,15 @@ export function InventoryPrototype() {
     statusTimeoutRef.current = window.setTimeout(() => {
       setStatusOverride(null);
     }, 2400);
+  }
+
+  async function runDesktopMutation<Result>(operation: () => Promise<Result>): Promise<Result> {
+    try {
+      return await operation();
+    } catch (error) {
+      markSharedUnavailable();
+      throw error;
+    }
   }
 
   function handleThemeToggle(): void {
@@ -165,6 +254,10 @@ export function InventoryPrototype() {
   }
 
   function handleAddRecord(): void {
+    if (!canModifyRecords) {
+      announceStatus(sharedStatus.message || "Shared workspace unavailable. Viewing local cache only.");
+      return;
+    }
     setContextMenu(null);
     setDialogState({ mode: "add" });
   }
@@ -189,6 +282,11 @@ export function InventoryPrototype() {
   }
 
   async function handleToggleVerified(recordId: string): Promise<void> {
+    if (dataSource === "desktop" && !canModifyRecords) {
+      announceStatus(sharedStatus.message || "Shared workspace unavailable. Viewing local cache only.");
+      return;
+    }
+
     const nextVerified = !records.find((record) => record.id === recordId)?.verifiedInSurvey;
 
     if (dataSource === "desktop" && window.inventoryDesktop?.toggleVerified && isDatabaseRecordId(recordId)) {
@@ -200,6 +298,7 @@ export function InventoryPrototype() {
         announceStatus("Verified state updated in the ME inventory database.");
         return;
       } catch {
+        markSharedUnavailable();
         announceStatus("Could not update the ME inventory database.");
         return;
       }
@@ -214,6 +313,10 @@ export function InventoryPrototype() {
   }
 
   async function handleSaveRecord(input: InventoryRecordInput): Promise<void> {
+    if (dataSource === "desktop" && !canModifyRecords) {
+      throw new Error(sharedStatus.message || "Shared workspace unavailable. Viewing local cache only.");
+    }
+
     if (dialogState?.mode === "edit" && dialogState.recordId) {
       const existingRecord = records.find((record) => record.id === dialogState.recordId);
       if (!existingRecord) {
@@ -221,7 +324,7 @@ export function InventoryPrototype() {
       }
 
       if (dataSource === "desktop" && window.inventoryDesktop?.updateRecord && isDatabaseRecordId(dialogState.recordId)) {
-        const updatedRecord = await window.inventoryDesktop.updateRecord(dialogState.recordId, input);
+        const updatedRecord = await runDesktopMutation(() => window.inventoryDesktop!.updateRecord(dialogState.recordId!, input));
         setRecords((current) => current.map((record) => (record.id === updatedRecord.id ? updatedRecord : record)));
         announceStatus("Record updated in the ME inventory database.");
       } else {
@@ -235,7 +338,7 @@ export function InventoryPrototype() {
     }
 
     if (dataSource === "desktop" && window.inventoryDesktop?.createRecord) {
-      const createdRecord = await window.inventoryDesktop.createRecord(input);
+      const createdRecord = await runDesktopMutation(() => window.inventoryDesktop!.createRecord(input));
       setRecords((current) => [createdRecord, ...current]);
       announceStatus("Record added to the ME inventory database.");
     } else {
@@ -248,6 +351,11 @@ export function InventoryPrototype() {
   }
 
   async function handleArchiveChange(recordId: string, archived: boolean): Promise<void> {
+    if (dataSource === "desktop" && !canModifyRecords) {
+      announceStatus(sharedStatus.message || "Shared workspace unavailable. Viewing local cache only.");
+      return;
+    }
+
     const record = records.find((entry) => entry.id === recordId);
     if (!record || record.archived === archived) {
       return;
@@ -263,8 +371,13 @@ export function InventoryPrototype() {
     }
 
     if (dataSource === "desktop" && window.inventoryDesktop?.setArchived && isDatabaseRecordId(recordId)) {
-      const updatedRecord = await window.inventoryDesktop.setArchived(recordId, archived);
-      setRecords((current) => current.map((entry) => (entry.id === updatedRecord.id ? updatedRecord : entry)));
+      try {
+        const updatedRecord = await runDesktopMutation(() => window.inventoryDesktop!.setArchived(recordId, archived));
+        setRecords((current) => current.map((entry) => (entry.id === updatedRecord.id ? updatedRecord : entry)));
+      } catch {
+        announceStatus("Could not update the shared inventory database.");
+        return;
+      }
     } else {
       setRecords((current) =>
         current.map((entry) => (entry.id === recordId ? { ...entry, archived, updatedAt: new Date().toISOString() } : entry)),
@@ -275,6 +388,11 @@ export function InventoryPrototype() {
   }
 
   async function handleDeleteRecord(recordId: string): Promise<void> {
+    if (dataSource === "desktop" && !canModifyRecords) {
+      announceStatus(sharedStatus.message || "Shared workspace unavailable. Viewing local cache only.");
+      return;
+    }
+
     const record = records.find((entry) => entry.id === recordId);
     if (!record) {
       return;
@@ -286,7 +404,12 @@ export function InventoryPrototype() {
     }
 
     if (dataSource === "desktop" && window.inventoryDesktop?.deleteRecord && isDatabaseRecordId(recordId)) {
-      await window.inventoryDesktop.deleteRecord(recordId);
+      try {
+        await runDesktopMutation(() => window.inventoryDesktop!.deleteRecord(recordId));
+      } catch {
+        announceStatus("Could not delete from the shared inventory database.");
+        return;
+      }
     }
 
     setRecords((current) => current.filter((entry) => entry.id !== recordId));
@@ -418,6 +541,7 @@ export function InventoryPrototype() {
       <main className="flex h-full min-h-0 flex-col overflow-hidden">
         <InventoryHeader
           archiveCount={counts.archive}
+          canModifyRecords={canModifyRecords}
           inventoryCount={counts.inventory}
           onAddRecord={handleAddRecord}
           onExportExcel={() => {
@@ -456,6 +580,7 @@ export function InventoryPrototype() {
               ) : sortedRecords.length > 0 ? (
                 <InventoryTable
                   activeRecordId={contextMenu?.recordId ?? dialogRecord?.id ?? null}
+                  canModifyRecords={canModifyRecords}
                   colorRows={colorRows}
                   columns={visibleColumns}
                   onOpenContextMenu={handleOpenContextMenu}
@@ -479,6 +604,7 @@ export function InventoryPrototype() {
 
       {contextMenu && contextRecord ? (
         <RecordContextMenu
+          canModifyRecords={canModifyRecords}
           position={{ x: contextMenu.x, y: contextMenu.y }}
           record={contextRecord}
           scope={scope}
@@ -494,6 +620,7 @@ export function InventoryPrototype() {
           key={`${dialogState.mode}-${dialogState.recordId ?? scope}`}
           defaultArchived={scope === "archive"}
           mode={dialogState.mode}
+          readOnly={dataSource === "desktop" && !canModifyRecords}
           record={dialogRecord}
           onClose={() => setDialogState(null)}
           onSave={handleSaveRecord}
@@ -505,6 +632,19 @@ export function InventoryPrototype() {
 
 function hasDesktopBridge(): boolean {
   return typeof window !== "undefined" && Boolean(window.inventoryDesktop?.isDesktop);
+}
+
+function buildDefaultStatusMessage(
+  totalCount: number,
+  verifiedCount: number,
+  dataSource: "desktop" | "mock",
+  sharedStatus: InventorySharedStatus,
+): string {
+  const summary = `Total: ${totalCount} | Verified: ${verifiedCount}/${totalCount}`;
+  if (dataSource !== "desktop" || !sharedStatus.message) {
+    return summary;
+  }
+  return `${summary} | ${sharedStatus.message}`;
 }
 
 function isDatabaseRecordId(recordId: string): boolean {
@@ -560,6 +700,7 @@ function buildLocalCreatedRecord(input: InventoryRecordInput): InventoryRecord {
     verifiedInSurvey: input.verifiedInSurvey,
     archived: input.archived,
     manualEntry: true,
+    picturePath: input.picturePath ?? "",
     createdAt: timestamp,
     updatedAt: timestamp,
   };
@@ -584,6 +725,7 @@ function buildLocalUpdatedRecord(existingRecord: InventoryRecord, input: Invento
     condition: input.condition,
     verifiedInSurvey: input.verifiedInSurvey,
     archived: input.archived,
+    picturePath: input.picturePath ?? "",
     updatedAt: new Date().toISOString(),
   };
 }

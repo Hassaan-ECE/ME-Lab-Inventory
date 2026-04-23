@@ -1,5 +1,5 @@
 declare module "../../electron/inventory-db.mjs" {
-  import type { InventoryRecord, InventoryRecordInput } from "@/types/inventory";
+  import type { InventoryRecord, InventoryRecordInput, InventorySharedStatus } from "@/types/inventory";
 
   interface RuntimeContext {
     appPath: string;
@@ -11,6 +11,13 @@ declare module "../../electron/inventory-db.mjs" {
   export function loadInventoryRecords(runtimeContext: RuntimeContext): {
     dbPath: string;
     records: InventoryRecord[];
+    shared: InventorySharedStatus;
+  };
+
+  export function syncInventoryWithShared(runtimeContext: RuntimeContext): {
+    dbPath: string;
+    records: InventoryRecord[];
+    shared: InventorySharedStatus;
   };
 
   export function createInventoryRecord(

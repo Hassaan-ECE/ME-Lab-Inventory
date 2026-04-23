@@ -49,6 +49,18 @@ export interface InventoryRecordInput {
   condition: string;
   verifiedInSurvey: boolean;
   archived: boolean;
+  picturePath?: string;
+}
+
+export interface InventorySharedStatus {
+  available: boolean;
+  canModify: boolean;
+  enabled: boolean;
+  message: string;
+  revision?: string;
+  sharedDbPath?: string;
+  sharedRootPath?: string;
+  syncIntervalMs?: number;
 }
 
 export interface FilterState {

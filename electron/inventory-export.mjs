@@ -26,6 +26,14 @@ const HEADER_BORDER = {
   bottom: { style: "medium", color: { argb: "374151" } },
   right: { style: "thin", color: { argb: "374151" } },
 };
+const ISSUE_FILLS = {
+  duplicate: solidFill("FEF3C7"),
+  unmatched: solidFill("E5E7EB"),
+  missing_id: solidFill("FEE2E2"),
+  placeholder: solidFill("F3E8FF"),
+  conflict: solidFill("FCE7F3"),
+  parse_error: solidFill("FEE2E2"),
+};
 
 const EXPORT_COLUMNS = [
   { header: "Asset Number", key: "asset_number", width: 16, align: "left" },
@@ -49,9 +57,21 @@ const EXPORT_COLUMNS = [
   { header: "Rental Vendor", key: "rental_vendor", width: 14, align: "left" },
   { header: "Rental Cost/Mo", key: "rental_cost_monthly", width: 14, align: "right", format: "currency" },
   { header: "Verified", key: "verified_in_survey", width: 14, align: "center", format: "boolean" },
+  { header: "Archived", key: "is_archived", width: 12, align: "center", format: "boolean" },
   { header: "Blue Dot", key: "blue_dot_ref", width: 10, align: "center" },
   { header: "Est. Age (Yrs)", key: "estimated_age_years", width: 13, align: "center", format: "number" },
   { header: "Notes", key: "notes", width: 40, align: "left", wrap: true },
+];
+
+const ISSUE_COLUMNS = [
+  { header: "Type", key: "issue_type", width: 14, align: "center", format: "issue_type" },
+  { header: "Source File", key: "source_file", width: 16, align: "left" },
+  { header: "Sheet", key: "source_sheet", width: 16, align: "left" },
+  { header: "Row", key: "source_row", width: 8, align: "center" },
+  { header: "Asset Number", key: "asset_number", width: 16, align: "left" },
+  { header: "Serial Number", key: "serial_number", width: 18, align: "left" },
+  { header: "Summary", key: "summary", width: 50, align: "left", wrap: true },
+  { header: "Status", key: "resolution_status", width: 13, align: "center" },
 ];
 
 const SELECT_EXPORT_SQL = `
@@ -85,6 +105,20 @@ const SELECT_EXPORT_SQL = `
     updated_at
   FROM equipment
   ORDER BY is_archived ASC, updated_at DESC, record_id DESC
+`;
+
+const SELECT_IMPORT_ISSUES_SQL = `
+  SELECT
+    issue_type,
+    source_file,
+    source_sheet,
+    source_row,
+    asset_number,
+    serial_number,
+    summary,
+    resolution_status
+  FROM import_issues
+  ORDER BY created_at DESC, id DESC
 `;
 
 export async function exportExcelInventory({
@@ -139,29 +173,29 @@ export async function exportExcelInventory({
 
 export async function writeInventoryWorkbook(runtimeContext, outputPath) {
   const rows = loadExportRows(runtimeContext);
+  const issueRows = loadImportIssueRows(runtimeContext);
   const workbook = new ExcelJS.Workbook();
 
   workbook.creator = "Syed Hassaan Shah";
   workbook.created = new Date();
   workbook.modified = new Date();
 
-  const inventoryRows = rows.filter((row) => !Boolean(row.is_archived));
-  const archiveRows = rows.filter((row) => Boolean(row.is_archived));
   const summaryStats = buildSummaryStats(rows);
 
   const inventorySheet = workbook.addWorksheet("Inventory");
-  const archiveSheet = workbook.addWorksheet("Archive");
+  const issueSheet = workbook.addWorksheet("Import Issues");
   const summarySheet = workbook.addWorksheet("Export Summary");
 
-  buildInventorySheet(inventorySheet, inventoryRows);
-  buildInventorySheet(archiveSheet, archiveRows);
-  buildSummarySheet(summarySheet, summaryStats);
+  buildInventorySheet(inventorySheet, rows);
+  buildImportIssuesSheet(issueSheet, issueRows);
+  buildSummarySheet(summarySheet, summaryStats, issueRows);
 
   await workbook.xlsx.writeFile(outputPath);
 
   return {
-    archiveCount: archiveRows.length,
-    inventoryCount: inventoryRows.length,
+    archiveCount: summaryStats.archived,
+    importIssueCount: issueRows.length,
+    inventoryCount: summaryStats.inventory,
     outputPath,
     totalCount: rows.length,
   };
@@ -178,7 +212,26 @@ function loadExportRows(runtimeContext) {
   }
 }
 
+function loadImportIssueRows(runtimeContext) {
+  const dbPath = resolveDbPath(runtimeContext);
+  const db = new DatabaseSync(dbPath, { readOnly: true });
+
+  try {
+    return db.prepare(SELECT_IMPORT_ISSUES_SQL).all();
+  } finally {
+    db.close();
+  }
+}
+
 function buildInventorySheet(worksheet, rows) {
+  buildFormattedSheet(worksheet, rows, EXPORT_COLUMNS);
+}
+
+function buildImportIssuesSheet(worksheet, rows) {
+  buildFormattedSheet(worksheet, rows, ISSUE_COLUMNS);
+}
+
+function buildFormattedSheet(worksheet, rows, columns) {
   worksheet.properties.defaultRowHeight = 20;
   worksheet.pageSetup = {
     fitToHeight: 0,
@@ -187,7 +240,7 @@ function buildInventorySheet(worksheet, rows) {
     orientation: "landscape",
   };
   worksheet.views = [{ state: "frozen", ySplit: 1 }];
-  worksheet.columns = EXPORT_COLUMNS.map((column) => ({
+  worksheet.columns = columns.map((column) => ({
     header: column.header,
     key: column.key,
     width: column.width,
@@ -205,13 +258,13 @@ function buildInventorySheet(worksheet, rows) {
 
   rows.forEach((row, index) => {
     const worksheetRow = worksheet.addRow(
-      EXPORT_COLUMNS.map((column) => formatCellValue(row[column.key], column.format)),
+      columns.map((column) => formatCellValue(row[column.key], column.format)),
     );
     const isEvenRow = index % 2 === 0;
     const bandColor = isEvenRow ? OFF_WHITE : BAND;
 
     worksheetRow.eachCell((cell, columnNumber) => {
-      const column = EXPORT_COLUMNS[columnNumber - 1];
+      const column = columns[columnNumber - 1];
       const style = getCellStyle(row, column, bandColor);
 
       cell.alignment = style.alignment;
@@ -226,11 +279,11 @@ function buildInventorySheet(worksheet, rows) {
 
   worksheet.autoFilter = {
     from: { column: 1, row: 1 },
-    to: { column: EXPORT_COLUMNS.length, row: Math.max(1, rows.length + 1) },
+    to: { column: columns.length, row: Math.max(1, rows.length + 1) },
   };
 }
 
-function buildSummarySheet(worksheet, stats) {
+function buildSummarySheet(worksheet, stats, issueRows) {
   worksheet.properties.defaultRowHeight = 20;
   worksheet.columns = [
     { width: 32 },
@@ -239,7 +292,7 @@ function buildSummarySheet(worksheet, stats) {
 
   const titleRow = worksheet.getRow(1);
   worksheet.mergeCells("A1:B1");
-  titleRow.getCell(1).value = "ME Lab Inventory — Export Summary";
+  titleRow.getCell(1).value = "ME Lab Inventory - Export Summary";
   titleRow.getCell(1).font = { bold: true, size: 16, color: { argb: "1F2937" } };
 
   worksheet.getCell("A2").value = `Generated ${new Date().toISOString().replace("T", " ").slice(0, 19)}`;
@@ -263,7 +316,16 @@ function buildSummarySheet(worksheet, stats) {
     ["Reference Only (No Cal)", stats.referenceOnly],
   ]);
   row += 1;
-  writeSummarySection(worksheet, row, "Audit", [["Verified", stats.verified]]);
+  row = writeSummarySection(worksheet, row, "Audit", [["Verified", stats.verified]]);
+  row += 1;
+  row = writeSummarySection(worksheet, row, "Import Review", [
+    ["Unresolved Import Issues", issueRows.filter((row) => String(row.resolution_status ?? "") === "unresolved").length],
+  ]);
+  row += 1;
+  writeSummarySection(worksheet, row, "Source Files", [
+    ["Master List", "Machine Shop Material list.xlsx"],
+    ["Survey", ""],
+  ]);
 }
 
 function writeSummarySection(worksheet, startRow, title, rows) {
@@ -349,6 +411,14 @@ function getCellStyle(row, column, bandColor) {
       alignment: { horizontal: "center", vertical: "middle" },
       fill: getCalibrationFill(row.calibration_status) ?? baseFill,
       font: getCalibrationFont(row.calibration_status) ?? baseFont,
+    };
+  }
+
+  if (column.format === "issue_type") {
+    return {
+      alignment: { horizontal: "center", vertical: "middle" },
+      fill: ISSUE_FILLS[String(row.issue_type ?? "")] ?? baseFill,
+      font: baseFont,
     };
   }
 

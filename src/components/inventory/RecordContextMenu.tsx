@@ -6,6 +6,7 @@ import type { InventoryRecord, InventoryScope } from "@/types/inventory";
 export type RecordContextAction = "open" | "open-link" | "search-online" | "archive-toggle" | "delete";
 
 interface RecordContextMenuProps {
+  canModifyRecords: boolean;
   onAction: (action: RecordContextAction) => void;
   onClose: () => void;
   position: {
@@ -16,7 +17,7 @@ interface RecordContextMenuProps {
   scope: InventoryScope;
 }
 
-export function RecordContextMenu({ onAction, onClose, position, record, scope }: RecordContextMenuProps) {
+export function RecordContextMenu({ canModifyRecords, onAction, onClose, position, record, scope }: RecordContextMenuProps) {
   const menuRef = useRef<HTMLDivElement | null>(null);
   const archiveLabel = scope === "archive" || record.archived ? "Restore Record" : "Archive Record";
   const hasSavedLink = record.links.trim().length > 0;
@@ -60,8 +61,8 @@ export function RecordContextMenu({ onAction, onClose, position, record, scope }
           {hasSavedLink ? <MenuButton label="Open Saved Link" onClick={() => onAction("open-link")} /> : null}
           <MenuButton label="Search Online" onClick={() => onAction("search-online")} />
           <div className="my-1 h-px bg-border/70" />
-          <MenuButton label={archiveLabel} onClick={() => onAction("archive-toggle")} />
-          <MenuButton destructive label="Delete Record" onClick={() => onAction("delete")} />
+          <MenuButton disabled={!canModifyRecords} label={archiveLabel} onClick={() => onAction("archive-toggle")} />
+          <MenuButton destructive disabled={!canModifyRecords} label="Delete Record" onClick={() => onAction("delete")} />
         </div>
       </div>
     </div>

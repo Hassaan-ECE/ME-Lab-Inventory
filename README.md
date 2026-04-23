@@ -2,7 +2,7 @@
 
 Desktop inventory application for the ME lab, rebuilt from the original Python app in `D:\coding\Inventory_Management_System` with a T3-inspired visual system from `D:\coding\t3code_design`.
 
-This repository is no longer just a browser prototype. It is an Electron desktop app with a local SQLite-backed workflow for manual record management.
+This repository is no longer just a browser prototype. It is an Electron desktop app with a shared SQLite-backed workflow and a local cache for manual record management.
 
 ## Current Status
 
@@ -21,8 +21,10 @@ Implemented:
 - row context menu actions
 - archive and restore
 - delete record
-- real Excel export
-- placeholder HTML export button
+- single export menu
+- Python-style Excel export
+- placeholder HTML export menu item
+- shared authoritative database sync
 - persisted theme and table preferences
 
 Intentionally not implemented yet:
@@ -31,7 +33,6 @@ Intentionally not implemented yet:
 - HTML export generation
 - quick edit dialog parity with the Python app
 - image/file browsing inside the full record dialog
-- shared database sync and watcher logic
 - updater flow redesign
 - TE / template variants
 
@@ -44,8 +45,7 @@ The main window is fixed and does not scroll as a whole. The records area scroll
 Primary actions:
 
 - `Add Record`
-- `Export Excel`
-- `Export HTML`
+- `Export` menu with `Excel` and placeholder `HTML`
 - theme toggle
 - `Inventory` / `Archive` view switching
 
@@ -99,15 +99,23 @@ During development, the app reads from:
 
 - `data/me_lab_inventory.db`
 
+When the shared workspace is reachable, this repo-local database acts as a local cache. The authoritative shared database is:
+
+- default shared root: `S:\Manufacturing\Internal\_Syed_H_Shah\InventoryApps\ME`
+- default shared database: `<shared root>\shared\me_lab_shared.db`
+- override env var: `ME_LAB_SHARED_ROOT`
+
+On startup, the app loads the local cache first, then refreshes it from the shared database. If the shared root is reachable but the shared database is missing or empty, the app bootstraps the shared database from the local seed. If shared storage is unavailable, the app remains open for view/search/export, but record mutations are disabled.
+
 ### Packaged desktop builds
 
-Packaged builds ship the bundled database as an application resource. On first launch, the app copies that database into Electron's writable `userData` directory and operates on that local copy.
+Packaged builds ship the bundled database as an application resource. On first launch, the app copies that database into Electron's writable `userData` directory and uses that file as the local cache.
 
 That means:
 
-- edits made in the installed app are stored locally
-- verified toggles write to the desktop database
-- add, edit, archive, restore, and delete actions are real database operations
+- connected edits write to the shared authoritative database first
+- the local cache is refreshed from shared after sync and write cycles
+- verified toggles, add, edit, archive, restore, and delete actions are real shared-backed database operations
 - the bundled source database in the repo is the seed, not the live installed database
 
 Relevant Electron files:
@@ -119,19 +127,20 @@ Relevant Electron files:
 
 ## Excel Export
 
-`Export Excel` is implemented in the Electron main process, not in the renderer.
+`Export > Excel` is implemented in the Electron main process, not in the renderer.
 
 Behavior:
 
 - opens a native save dialog
 - defaults to `ME_Lab_Inventory_Export.xlsx`
 - exports all records, not just the currently visible filtered rows
-- separates active and archived data into different worksheets
+- keeps active and archived records together in the main sheet with an `Archived` column
+- follows the Python app's workbook structure and print-friendly styling
 
 Workbook sheets:
 
 1. `Inventory`
-2. `Archive`
+2. `Import Issues`
 3. `Export Summary`
 
 Export summary includes:
@@ -142,6 +151,7 @@ Export summary includes:
 - lifecycle counts
 - calibration counts
 - verified count
+- unresolved import issue count
 
 Export formatting includes:
 
@@ -280,6 +290,7 @@ Automated coverage currently includes:
 - record add and edit flows
 - row context menu behavior
 - Excel export workbook generation
+- shared database bootstrap and sync behavior
 - desktop bridge export invocation
 
 Main test files:
@@ -299,7 +310,6 @@ These are still open relative to the original Python app:
 - no import workflow exists anymore by design
 - no quick-edit dialog from the row context menu
 - no image browse / preview inside the record editor
-- no shared sync workflow
 - no update delivery flow yet
 
 ## Notes for Contributors

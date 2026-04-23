@@ -8,6 +8,7 @@ import type { ColumnConfig, InventoryRecord, SortState } from "@/types/inventory
 
 interface InventoryTableProps {
   activeRecordId?: string | null;
+  canModifyRecords: boolean;
   colorRows: boolean;
   columns: readonly ColumnConfig[];
   onOpenContextMenu: (recordId: string, clientX: number, clientY: number) => void;
@@ -20,6 +21,7 @@ interface InventoryTableProps {
 
 export function InventoryTable({
   activeRecordId = null,
+  canModifyRecords,
   colorRows,
   columns,
   onOpenContextMenu,
@@ -97,7 +99,7 @@ export function InventoryTable({
                       column.align === "center" ? "text-center" : "text-left",
                     )}
                   >
-                    {renderCell(record, column, onToggleVerified)}
+                    {renderCell(record, column, onToggleVerified, canModifyRecords)}
                   </td>
                 ))}
               </tr>
@@ -113,6 +115,7 @@ function renderCell(
   record: InventoryRecord,
   column: ColumnConfig,
   onToggleVerified: (recordId: string) => void,
+  canModifyRecords: boolean,
 ) {
   switch (column.key) {
     case "verified":
@@ -120,6 +123,7 @@ function renderCell(
         <button
           aria-label={`Toggle verified for ${record.description}`}
           className="inline-flex items-center justify-center"
+          disabled={!canModifyRecords}
           type="button"
           onClick={() => onToggleVerified(record.id)}
         >

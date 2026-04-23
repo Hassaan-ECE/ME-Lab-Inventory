@@ -65,7 +65,7 @@ describe("inventory Excel export", () => {
     fs.rmSync(tempDir, { recursive: true, force: true });
   });
 
-  it("writes a workbook with inventory, archive, and summary sheets", async () => {
+  it("writes a Python-style workbook with inventory, import issue, and summary sheets", async () => {
     const outputPath = path.join(tempDir, "ME_Lab_Inventory_Export.xlsx");
     const workbook = new ExcelJS.Workbook();
     const db = new DatabaseSync(path.join(tempDir, "data", "me_lab_inventory.db"), { readOnly: true });
@@ -99,22 +99,23 @@ describe("inventory Excel export", () => {
     await workbook.xlsx.readFile(outputPath);
 
     const inventorySheet = workbook.getWorksheet("Inventory");
-    const archiveSheet = workbook.getWorksheet("Archive");
+    const issueSheet = workbook.getWorksheet("Import Issues");
     const summarySheet = workbook.getWorksheet("Export Summary");
 
-    expect(workbook.worksheets.map((sheet) => sheet.name)).toEqual(["Inventory", "Archive", "Export Summary"]);
-    expect(workbook.getWorksheet("Import Issues")).toBeUndefined();
+    expect(workbook.worksheets.map((sheet) => sheet.name)).toEqual(["Inventory", "Import Issues", "Export Summary"]);
+    expect(workbook.getWorksheet("Archive")).toBeUndefined();
     expect(inventorySheet).toBeDefined();
-    expect(archiveSheet).toBeDefined();
+    expect(issueSheet).toBeDefined();
     expect(summarySheet).toBeDefined();
-    expect(inventorySheet?.getRow(1).values).not.toContain("Archived");
+    expect(inventorySheet?.getRow(1).values).toContain("Archived");
+    expect(issueSheet?.getRow(1).values).toContain("Summary");
     expect(getWorksheetText(inventorySheet)).toContain(activeDescription);
-    expect(getWorksheetText(inventorySheet)).not.toContain(archivedDescription);
-    expect(getWorksheetText(archiveSheet)).toContain(archivedDescription);
+    expect(getWorksheetText(inventorySheet)).toContain(archivedDescription);
     expect(getSummaryValue(summarySheet, "Total Equipment Records")).toBe(totalCount);
     expect(getSummaryValue(summarySheet, "Inventory View Records")).toBe(totalCount - archivedCount);
     expect(getSummaryValue(summarySheet, "Archived Records")).toBe(archivedCount);
     expect(getSummaryValue(summarySheet, "Verified")).toBe(verifiedCount);
+    expect(getSummaryValue(summarySheet, "Master List")).toBe("Machine Shop Material list.xlsx");
   });
 
   it("returns a canceled result when the save dialog is dismissed", async () => {

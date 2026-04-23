@@ -3,7 +3,15 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { InventoryPrototype } from "@/components/inventory/InventoryPrototype";
-import type { InventoryRecord } from "@/types/inventory";
+import type { InventoryRecord, InventorySharedStatus } from "@/types/inventory";
+
+const CONNECTED_SHARED_STATUS: InventorySharedStatus = {
+  available: true,
+  canModify: true,
+  enabled: true,
+  message: "",
+  syncIntervalMs: 10_000,
+};
 
 describe("InventoryPrototype shell", () => {
   beforeEach(() => {
@@ -17,8 +25,9 @@ describe("InventoryPrototype shell", () => {
 
     expect(screen.getAllByText("ME Lab Inventory")).toHaveLength(1);
     expect(screen.queryByRole("button", { name: "Import Data" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Export Excel" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Export HTML" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Export/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Export Excel" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Export HTML" })).not.toBeInTheDocument();
     expect(screen.getByText("Showing all 10 equipment records")).toBeInTheDocument();
     expect(screen.getByText("Total: 14 | Verified: 8/14")).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: /Manufacturer/i })).toBeInTheDocument();
@@ -67,6 +76,12 @@ describe("InventoryPrototype shell", () => {
       loadInventory: vi.fn().mockResolvedValue({
         dbPath: "D:/coding/IMS_t3code_ref_design/data/me_lab_inventory.db",
         records: desktopRecords,
+        shared: CONNECTED_SHARED_STATUS,
+      }),
+      syncInventory: vi.fn().mockResolvedValue({
+        dbPath: "D:/coding/IMS_t3code_ref_design/data/me_lab_inventory.db",
+        records: desktopRecords,
+        shared: CONNECTED_SHARED_STATUS,
       }),
       toggleVerified: vi.fn().mockResolvedValue(desktopRecords[0]),
       createRecord: vi.fn().mockResolvedValue(desktopRecords[0]),
@@ -74,6 +89,8 @@ describe("InventoryPrototype shell", () => {
       setArchived: vi.fn().mockResolvedValue(desktopRecords[0]),
       deleteRecord: vi.fn().mockResolvedValue({ recordId: desktopRecords[0].id }),
       openExternal: vi.fn().mockResolvedValue(true),
+      openPath: vi.fn().mockResolvedValue(true),
+      pickPicturePath: vi.fn().mockResolvedValue(null),
       exportExcel: vi.fn().mockResolvedValue({ canceled: false, outputPath: "D:/exports/ME_Lab_Inventory_Export.xlsx" }),
     };
 
@@ -138,7 +155,8 @@ describe("InventoryPrototype shell", () => {
     const user = userEvent.setup();
     render(<InventoryPrototype />);
 
-    await user.click(screen.getByRole("button", { name: "Export HTML" }));
+    await user.click(screen.getByRole("button", { name: /Export/i }));
+    await user.click(screen.getByRole("menuitem", { name: "HTML" }));
 
     expect(screen.getByText("HTML export is not implemented yet.")).toBeInTheDocument();
   });
@@ -155,6 +173,12 @@ describe("InventoryPrototype shell", () => {
       loadInventory: vi.fn().mockResolvedValue({
         dbPath: "D:/coding/IMS_t3code_ref_design/data/me_lab_inventory.db",
         records: [],
+        shared: CONNECTED_SHARED_STATUS,
+      }),
+      syncInventory: vi.fn().mockResolvedValue({
+        dbPath: "D:/coding/IMS_t3code_ref_design/data/me_lab_inventory.db",
+        records: [],
+        shared: CONNECTED_SHARED_STATUS,
       }),
       toggleVerified: vi.fn().mockResolvedValue(null),
       createRecord: vi.fn().mockResolvedValue(null),
@@ -162,12 +186,15 @@ describe("InventoryPrototype shell", () => {
       setArchived: vi.fn().mockResolvedValue(null),
       deleteRecord: vi.fn().mockResolvedValue({ recordId: "0" }),
       openExternal: vi.fn().mockResolvedValue(true),
+      openPath: vi.fn().mockResolvedValue(true),
+      pickPicturePath: vi.fn().mockResolvedValue(null),
       exportExcel,
     };
 
     render(<InventoryPrototype />);
 
-    await user.click(screen.getByRole("button", { name: "Export Excel" }));
+    await user.click(screen.getByRole("button", { name: /Export/i }));
+    await user.click(screen.getByRole("menuitem", { name: "Excel" }));
 
     expect(exportExcel).toHaveBeenCalledTimes(1);
     expect(await screen.findByText("Excel export completed.")).toBeInTheDocument();
