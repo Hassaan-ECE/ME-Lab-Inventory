@@ -1,26 +1,26 @@
 import { useEffect, useRef } from "react";
 
 import { cn } from "@/lib/utils";
-import type { InventoryRecord, InventoryScope } from "@/types/inventory";
+import type { InventoryEntry, InventoryScope } from "@/types/inventory";
 
-export type RecordContextAction = "open" | "open-link" | "search-online" | "archive-toggle" | "delete";
+export type EntryContextAction = "open" | "open-link" | "search-online" | "archive-toggle" | "delete";
 
-interface RecordContextMenuProps {
-  canModifyRecords: boolean;
-  onAction: (action: RecordContextAction) => void;
+interface EntryContextMenuProps {
+  canModifyEntries: boolean;
+  onAction: (action: EntryContextAction) => void;
   onClose: () => void;
   position: {
     x: number;
     y: number;
   };
-  record: InventoryRecord;
+  entry: InventoryEntry;
   scope: InventoryScope;
 }
 
-export function RecordContextMenu({ canModifyRecords, onAction, onClose, position, record, scope }: RecordContextMenuProps) {
+export function EntryContextMenu({ canModifyEntries, onAction, onClose, position, entry, scope }: EntryContextMenuProps) {
   const menuRef = useRef<HTMLDivElement | null>(null);
-  const archiveLabel = scope === "archive" || record.archived ? "Restore Record" : "Archive Record";
-  const hasSavedLink = record.links.trim().length > 0;
+  const archiveLabel = scope === "archive" || entry.archived ? "Restore Entry" : "Archive Entry";
+  const hasSavedLink = entry.links.trim().length > 0;
 
   useEffect(() => {
     function handlePointerDown(event: MouseEvent): void {
@@ -57,12 +57,12 @@ export function RecordContextMenu({ canModifyRecords, onAction, onClose, positio
         style={{ left: position.x, top: position.y }}
       >
         <div className="space-y-1">
-          <MenuButton label="Open Full Record" onClick={() => onAction("open")} />
+          <MenuButton label="Open Full Entry" onClick={() => onAction("open")} />
           {hasSavedLink ? <MenuButton label="Open Saved Link" onClick={() => onAction("open-link")} /> : null}
           <MenuButton label="Search Online" onClick={() => onAction("search-online")} />
           <div className="my-1 h-px bg-border/70" />
-          <MenuButton disabled={!canModifyRecords} label={archiveLabel} onClick={() => onAction("archive-toggle")} />
-          <MenuButton destructive disabled={!canModifyRecords} label="Delete Record" onClick={() => onAction("delete")} />
+          <MenuButton disabled={!canModifyEntries} label={archiveLabel} onClick={() => onAction("archive-toggle")} />
+          <MenuButton destructive disabled={!canModifyEntries} label="Delete Entry" onClick={() => onAction("delete")} />
         </div>
       </div>
     </div>

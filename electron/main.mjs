@@ -5,13 +5,13 @@ import { fileURLToPath } from "node:url";
 import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
 
 import {
-  createInventoryRecord,
-  deleteInventoryRecord,
-  loadInventoryRecords,
-  setArchivedRecord,
+  createInventoryEntry,
+  deleteInventoryEntry,
+  loadInventoryEntries,
+  setArchivedEntry,
   syncInventoryWithShared,
-  toggleVerifiedRecord,
-  updateInventoryRecord,
+  toggleVerifiedEntry,
+  updateInventoryEntry,
 } from "./inventory-db.mjs";
 import { exportExcelInventory } from "./inventory-export.mjs";
 import { resolveSharedDbPath, resolveSharedDirectoryPath } from "./inventory-runtime.mjs";
@@ -22,6 +22,7 @@ const projectRoot = path.resolve(__dirname, "..");
 const preloadPath = path.join(__dirname, "preload.mjs");
 const appIconPath = path.join(__dirname, "assets", "app_icon.ico");
 const devServerUrl = process.env.VITE_DEV_SERVER_URL;
+const appDisplayName = "ME Inventory v0.9.0";
 
 let mainWindow = null;
 let sharedWatcher = null;
@@ -45,7 +46,7 @@ function createMainWindow() {
     autoHideMenuBar: true,
     backgroundColor: "#0a0a0b",
     icon: appIconPath,
-    title: "ME Lab Inventory Prototype",
+    title: appDisplayName,
     webPreferences: {
       preload: preloadPath,
       contextIsolation: true,
@@ -119,28 +120,28 @@ function refreshSharedWatcher() {
 }
 
 app.whenReady().then(() => {
-  app.setAppUserModelId("com.syedhassaan.ims-t3code-ref-design");
+  app.setAppUserModelId("com.syedhassaan.me-inventory");
 
-  ipcMain.handle("inventory:load", () => loadInventoryRecords(buildRuntimeContext()));
+  ipcMain.handle("inventory:load", () => loadInventoryEntries(buildRuntimeContext()));
   ipcMain.handle("inventory:sync", () => {
     const result = syncInventoryWithShared(buildRuntimeContext());
     refreshSharedWatcher();
     return result;
   });
-  ipcMain.handle("inventory:toggle-verified", (_event, recordId, nextVerified) =>
-    toggleVerifiedRecord(buildRuntimeContext(), recordId, nextVerified),
+  ipcMain.handle("inventory:toggle-verified-entry", (_event, entryId, nextVerified) =>
+    toggleVerifiedEntry(buildRuntimeContext(), entryId, nextVerified),
   );
-  ipcMain.handle("inventory:create", (_event, recordInput) =>
-    createInventoryRecord(buildRuntimeContext(), recordInput),
+  ipcMain.handle("inventory:create-entry", (_event, entryInput) =>
+    createInventoryEntry(buildRuntimeContext(), entryInput),
   );
-  ipcMain.handle("inventory:update", (_event, recordId, recordInput) =>
-    updateInventoryRecord(buildRuntimeContext(), recordId, recordInput),
+  ipcMain.handle("inventory:update-entry", (_event, entryId, entryInput) =>
+    updateInventoryEntry(buildRuntimeContext(), entryId, entryInput),
   );
-  ipcMain.handle("inventory:set-archived", (_event, recordId, archived) =>
-    setArchivedRecord(buildRuntimeContext(), recordId, archived),
+  ipcMain.handle("inventory:set-archived-entry", (_event, entryId, archived) =>
+    setArchivedEntry(buildRuntimeContext(), entryId, archived),
   );
-  ipcMain.handle("inventory:delete", (_event, recordId) =>
-    deleteInventoryRecord(buildRuntimeContext(), recordId),
+  ipcMain.handle("inventory:delete-entry", (_event, entryId) =>
+    deleteInventoryEntry(buildRuntimeContext(), entryId),
   );
   ipcMain.handle("inventory:open-external", (_event, url) => shell.openExternal(url));
   ipcMain.handle("inventory:open-path", async (_event, targetPath) => {
@@ -158,7 +159,7 @@ app.whenReady().then(() => {
         { extensions: ["*"], name: "All Files" },
       ],
       properties: ["openFile"],
-      title: "Select Record Picture",
+      title: "Select Entry Picture",
     };
     const result = mainWindow
       ? await dialog.showOpenDialog(mainWindow, options)

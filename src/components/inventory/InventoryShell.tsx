@@ -4,8 +4,8 @@ import { ColumnMenu } from "@/components/inventory/ColumnMenu";
 import { EmptyResults } from "@/components/inventory/EmptyResults";
 import { FilterPanel } from "@/components/inventory/FilterPanel";
 import { InventoryHeader } from "@/components/inventory/InventoryHeader";
-import { RecordContextMenu, type RecordContextAction } from "@/components/inventory/RecordContextMenu";
-import { RecordDialog } from "@/components/inventory/RecordDialog";
+import { EntryContextMenu, type EntryContextAction } from "@/components/inventory/EntryContextMenu";
+import { EntryDialog } from "@/components/inventory/EntryDialog";
 import { InventoryTable } from "@/components/inventory/InventoryTable";
 import { SearchCard } from "@/components/inventory/SearchCard";
 import { StatusStrip } from "@/components/inventory/StatusStrip";
@@ -14,56 +14,58 @@ import {
   DEFAULT_FILTERS,
   buildDefaultColumnVisibility,
   buildResultsLabel,
-  filterRecords,
+  filterEntries,
   getInventoryCounts,
   getVisibleColumns,
   getVisibleDataColumnCount,
   mergeColumnVisibility,
-  sortRecords,
+  sortEntries,
 } from "@/lib/inventory";
 import { INVENTORY_COLUMNS } from "@/types/inventory";
 import type {
   ColumnKey,
   FilterState,
-  InventoryRecord,
-  InventoryRecordInput,
+  InventoryEntry,
+  InventoryEntryInput,
   InventorySharedStatus,
   InventoryScope,
   SortState,
   ThemeMode,
 } from "@/types/inventory";
 
-const THEME_STORAGE_KEY = "ims.t3.theme";
-const COLOR_ROWS_STORAGE_KEY = "ims.t3.colorRows";
-const COLUMN_VISIBILITY_STORAGE_KEY = "ims.t3.columnVisibility";
+const THEME_STORAGE_KEY = "meInventory.theme";
+const COLOR_ROWS_STORAGE_KEY = "meInventory.colorRows";
+const COLUMN_VISIBILITY_STORAGE_KEY = "meInventory.columnVisibility";
 const DEFAULT_SHARED_SYNC_INTERVAL_MS = 10_000;
 const MOCK_SHARED_STATUS: InventorySharedStatus = {
   available: true,
   canModify: true,
   enabled: false,
   message: "",
+  mutationMode: "shared",
 };
 const DESKTOP_SHARED_PENDING_STATUS: InventorySharedStatus = {
   available: false,
   canModify: false,
   enabled: true,
   message: "Checking shared workspace...",
+  mutationMode: "local",
   syncIntervalMs: DEFAULT_SHARED_SYNC_INTERVAL_MS,
 };
 
 interface DialogState {
   mode: "add" | "edit";
-  recordId?: string;
+  entryId?: string;
 }
 
 interface ContextMenuState {
-  recordId: string;
+  entryId: string;
   x: number;
   y: number;
 }
 
-export function InventoryPrototype() {
-  const [records, setRecords] = useState<InventoryRecord[]>(() => (hasDesktopBridge() ? [] : MOCK_INVENTORY));
+export function InventoryShell() {
+  const [entries, setEntries] = useState<InventoryEntry[]>(() => (hasDesktopBridge() ? [] : MOCK_INVENTORY));
   const [dataSource, setDataSource] = useState<"desktop" | "mock">(() => (hasDesktopBridge() ? "desktop" : "mock"));
   const [scope, setScope] = useState<InventoryScope>("inventory");
   const [theme, setTheme] = useState<ThemeMode>(() => readTheme());
@@ -82,18 +84,20 @@ export function InventoryPrototype() {
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const statusTimeoutRef = useRef<number | null>(null);
 
-  const markSharedUnavailable = useCallback((message = "Shared workspace unavailable. Viewing local cache only."): void => {
+  const markSharedUnavailable = useCallback((message = "Shared workspace unavailable. Saving changes locally."): void => {
     setSharedStatus((current) => ({
       ...current,
       available: false,
-      canModify: false,
+      canModify: true,
       enabled: true,
+      hasLocalOnlyChanges: current.hasLocalOnlyChanges,
       message,
+      mutationMode: "local",
       syncIntervalMs: current.syncIntervalMs ?? DEFAULT_SHARED_SYNC_INTERVAL_MS,
     }));
   }, []);
 
-  const syncRecordsFromDesktop = useCallback(
+  const syncEntriesFromDesktop = useCallback(
     async ({ applyResult = true }: { applyResult?: boolean } = {}): Promise<void> => {
       if (!window.inventoryDesktop?.syncInventory) {
         return;
@@ -104,7 +108,7 @@ export function InventoryPrototype() {
         if (!applyResult) {
           return;
         }
-        setRecords(payload.records);
+        setEntries(payload.entries);
         setDataSource("desktop");
         setSharedStatus(payload.shared);
       } catch {
@@ -140,7 +144,7 @@ export function InventoryPrototype() {
   useEffect(() => {
     let active = true;
 
-    async function loadRecordsFromDesktop(): Promise<void> {
+    async function loadEntriesFromDesktop(): Promise<void> {
       if (!window.inventoryDesktop?.loadInventory) {
         return;
       }
@@ -150,7 +154,7 @@ export function InventoryPrototype() {
         if (!active) {
           return;
         }
-        setRecords(payload.records);
+        setEntries(payload.entries);
         setSharedStatus(payload.shared ?? DESKTOP_SHARED_PENDING_STATUS);
         setDataSource("desktop");
         setStatusOverride(null);
@@ -158,7 +162,7 @@ export function InventoryPrototype() {
         if (!active) {
           return;
         }
-        setRecords(MOCK_INVENTORY);
+        setEntries(MOCK_INVENTORY);
         setDataSource("mock");
         setSharedStatus(MOCK_SHARED_STATUS);
         announceStatus("Database unavailable. Falling back to bundled mock data.");
@@ -169,16 +173,16 @@ export function InventoryPrototype() {
       }
 
       if (active) {
-        void syncRecordsFromDesktop();
+        void syncEntriesFromDesktop();
       }
     }
 
-    void loadRecordsFromDesktop();
+    void loadEntriesFromDesktop();
 
     return () => {
       active = false;
     };
-  }, [syncRecordsFromDesktop]);
+  }, [syncEntriesFromDesktop]);
 
   useEffect(() => {
     if (!window.inventoryDesktop?.syncInventory) {
@@ -188,10 +192,10 @@ export function InventoryPrototype() {
     let active = true;
     const syncIntervalMs = sharedStatus.syncIntervalMs ?? DEFAULT_SHARED_SYNC_INTERVAL_MS;
     const intervalId = window.setInterval(() => {
-      void syncRecordsFromDesktop({ applyResult: active });
+      void syncEntriesFromDesktop({ applyResult: active });
     }, syncIntervalMs);
     const unsubscribe = window.inventoryDesktop.onSharedInventoryChanged?.(() => {
-      void syncRecordsFromDesktop({ applyResult: active });
+      void syncEntriesFromDesktop({ applyResult: active });
     });
 
     return () => {
@@ -199,19 +203,19 @@ export function InventoryPrototype() {
       window.clearInterval(intervalId);
       unsubscribe?.();
     };
-  }, [sharedStatus.syncIntervalMs, syncRecordsFromDesktop]);
+  }, [sharedStatus.syncIntervalMs, syncEntriesFromDesktop]);
 
-  const filteredRecords = filterRecords(records, scope, query, filters);
-  const sortedRecords = sortRecords(filteredRecords, sortState);
-  const counts = getInventoryCounts(records);
-  const canModifyRecords = dataSource !== "desktop" || sharedStatus.canModify;
-  const resultsLabel = isLoading ? "Loading inventory records..." : buildResultsLabel(sortedRecords.length, scope, query, filters);
+  const filteredEntries = filterEntries(entries, scope, query, filters);
+  const sortedEntries = sortEntries(filteredEntries, sortState);
+  const counts = getInventoryCounts(entries);
+  const canModifyEntries = dataSource !== "desktop" || sharedStatus.canModify;
+  const resultsLabel = isLoading ? "Loading inventory entries..." : buildResultsLabel(sortedEntries.length, scope, query, filters);
   const visibleColumns = getVisibleColumns(columnVisibility);
   const statusMessage = isLoading
     ? "Loading ME inventory database..."
     : statusOverride ?? buildDefaultStatusMessage(counts.total, counts.verified, dataSource, sharedStatus);
-  const dialogRecord = dialogState?.mode === "edit" ? records.find((record) => record.id === dialogState.recordId) ?? null : null;
-  const contextRecord = contextMenu ? records.find((record) => record.id === contextMenu.recordId) ?? null : null;
+  const dialogEntry = dialogState?.mode === "edit" ? entries.find((entry) => entry.id === dialogState.entryId) ?? null : null;
+  const contextEntry = contextMenu ? entries.find((entry) => entry.id === contextMenu.entryId) ?? null : null;
 
   function announceStatus(message: string): void {
     setStatusOverride(message);
@@ -226,12 +230,13 @@ export function InventoryPrototype() {
   }
 
   async function runDesktopMutation<Result>(operation: () => Promise<Result>): Promise<Result> {
-    try {
-      return await operation();
-    } catch (error) {
-      markSharedUnavailable();
-      throw error;
-    }
+    const result = await operation();
+    void syncEntriesFromDesktop();
+    return result;
+  }
+
+  function getDesktopMutationMessage(sharedMessage: string, localMessage: string): string {
+    return sharedStatus.mutationMode === "local" ? localMessage : sharedMessage;
   }
 
   function handleThemeToggle(): void {
@@ -253,167 +258,166 @@ export function InventoryPrototype() {
     }));
   }
 
-  function handleAddRecord(): void {
-    if (!canModifyRecords) {
-      announceStatus(sharedStatus.message || "Shared workspace unavailable. Viewing local cache only.");
+  function handleAddEntry(): void {
+    if (!canModifyEntries) {
+      announceStatus(sharedStatus.message || "Shared workspace unavailable. Saving changes locally.");
       return;
     }
     setContextMenu(null);
     setDialogState({ mode: "add" });
   }
 
-  function handleOpenRecord(recordId: string): void {
+  function handleOpenEntry(entryId: string): void {
     setContextMenu(null);
-    setDialogState({ mode: "edit", recordId });
+    setDialogState({ mode: "edit", entryId });
   }
 
-  function handleOpenContextMenu(recordId: string, clientX: number, clientY: number): void {
+  function handleOpenContextMenu(entryId: string, clientX: number, clientY: number): void {
     const menuWidth = 240;
-    const record = records.find((entry) => entry.id === recordId);
-    const menuHeight = record?.links.trim() ? 212 : 172;
+    const entry = entries.find((entry) => entry.id === entryId);
+    const menuHeight = entry?.links.trim() ? 212 : 172;
     const maxX = typeof window === "undefined" ? clientX : Math.max(12, window.innerWidth - menuWidth - 12);
     const maxY = typeof window === "undefined" ? clientY : Math.max(12, window.innerHeight - menuHeight - 12);
 
     setContextMenu({
-      recordId,
+      entryId,
       x: Math.min(clientX, maxX),
       y: Math.min(clientY, maxY),
     });
   }
 
-  async function handleToggleVerified(recordId: string): Promise<void> {
-    if (dataSource === "desktop" && !canModifyRecords) {
-      announceStatus(sharedStatus.message || "Shared workspace unavailable. Viewing local cache only.");
+  async function handleToggleVerified(entryId: string): Promise<void> {
+    if (dataSource === "desktop" && !canModifyEntries) {
+      announceStatus(sharedStatus.message || "Shared workspace unavailable. Saving changes locally.");
       return;
     }
 
-    const nextVerified = !records.find((record) => record.id === recordId)?.verifiedInSurvey;
+    const nextVerified = !entries.find((entry) => entry.id === entryId)?.verifiedInSurvey;
 
-    if (dataSource === "desktop" && window.inventoryDesktop?.toggleVerified && isDatabaseRecordId(recordId)) {
+    if (dataSource === "desktop" && window.inventoryDesktop?.toggleVerifiedEntry && isDatabaseEntryId(entryId)) {
       try {
-        const updatedRecord = await window.inventoryDesktop.toggleVerified(recordId, nextVerified);
-        setRecords((current) =>
-          current.map((record) => (record.id === recordId ? updatedRecord : record)),
+        const updatedEntry = await runDesktopMutation(() => window.inventoryDesktop!.toggleVerifiedEntry(entryId, nextVerified));
+        setEntries((current) =>
+          current.map((entry) => (entry.id === entryId ? updatedEntry : entry)),
         );
-        announceStatus("Verified state updated in the ME inventory database.");
+        announceStatus(getDesktopMutationMessage("Verified state updated in the ME Inventory database.", "Verified state updated locally."));
         return;
       } catch {
-        markSharedUnavailable();
-        announceStatus("Could not update the ME inventory database.");
+        announceStatus("Could not update the ME Inventory database.");
         return;
       }
     }
 
-    setRecords((current) =>
-      current.map((record) =>
-        record.id === recordId ? { ...record, verifiedInSurvey: !record.verifiedInSurvey } : record,
+    setEntries((current) =>
+      current.map((entry) =>
+        entry.id === entryId ? { ...entry, verifiedInSurvey: !entry.verifiedInSurvey } : entry,
       ),
     );
-    announceStatus("Verified state updated locally in the prototype.");
+    announceStatus("Verified state updated locally.");
   }
 
-  async function handleSaveRecord(input: InventoryRecordInput): Promise<void> {
-    if (dataSource === "desktop" && !canModifyRecords) {
-      throw new Error(sharedStatus.message || "Shared workspace unavailable. Viewing local cache only.");
+  async function handleSaveEntry(input: InventoryEntryInput): Promise<void> {
+    if (dataSource === "desktop" && !canModifyEntries) {
+      throw new Error(sharedStatus.message || "Shared workspace unavailable. Saving changes locally.");
     }
 
-    if (dialogState?.mode === "edit" && dialogState.recordId) {
-      const existingRecord = records.find((record) => record.id === dialogState.recordId);
-      if (!existingRecord) {
-        throw new Error("The selected record could not be found.");
+    if (dialogState?.mode === "edit" && dialogState.entryId) {
+      const existingEntry = entries.find((entry) => entry.id === dialogState.entryId);
+      if (!existingEntry) {
+        throw new Error("The selected entry could not be found.");
       }
 
-      if (dataSource === "desktop" && window.inventoryDesktop?.updateRecord && isDatabaseRecordId(dialogState.recordId)) {
-        const updatedRecord = await runDesktopMutation(() => window.inventoryDesktop!.updateRecord(dialogState.recordId!, input));
-        setRecords((current) => current.map((record) => (record.id === updatedRecord.id ? updatedRecord : record)));
-        announceStatus("Record updated in the ME inventory database.");
+      if (dataSource === "desktop" && window.inventoryDesktop?.updateEntry && isDatabaseEntryId(dialogState.entryId)) {
+        const updatedEntry = await runDesktopMutation(() => window.inventoryDesktop!.updateEntry(dialogState.entryId!, input));
+        setEntries((current) => current.map((entry) => (entry.id === updatedEntry.id ? updatedEntry : entry)));
+        announceStatus(getDesktopMutationMessage("Entry updated in the ME Inventory database.", "Entry updated locally."));
       } else {
-        const updatedRecord = buildLocalUpdatedRecord(existingRecord, input);
-        setRecords((current) => current.map((record) => (record.id === updatedRecord.id ? updatedRecord : record)));
-        announceStatus("Record updated locally in the prototype.");
+        const updatedEntry = buildLocalUpdatedEntry(existingEntry, input);
+        setEntries((current) => current.map((entry) => (entry.id === updatedEntry.id ? updatedEntry : entry)));
+        announceStatus("Entry updated locally.");
       }
 
       setDialogState(null);
       return;
     }
 
-    if (dataSource === "desktop" && window.inventoryDesktop?.createRecord) {
-      const createdRecord = await runDesktopMutation(() => window.inventoryDesktop!.createRecord(input));
-      setRecords((current) => [createdRecord, ...current]);
-      announceStatus("Record added to the ME inventory database.");
+    if (dataSource === "desktop" && window.inventoryDesktop?.createEntry) {
+      const createdEntry = await runDesktopMutation(() => window.inventoryDesktop!.createEntry(input));
+      setEntries((current) => [createdEntry, ...current.filter((entry) => entry.id !== createdEntry.id)]);
+      announceStatus(getDesktopMutationMessage("Entry added to the ME Inventory database.", "Entry added locally."));
     } else {
-      const createdRecord = buildLocalCreatedRecord(input);
-      setRecords((current) => [createdRecord, ...current]);
-      announceStatus("Record added locally in the prototype.");
+      const createdEntry = buildLocalCreatedEntry(input);
+      setEntries((current) => [createdEntry, ...current]);
+      announceStatus("Entry added locally.");
     }
 
     setDialogState(null);
   }
 
-  async function handleArchiveChange(recordId: string, archived: boolean): Promise<void> {
-    if (dataSource === "desktop" && !canModifyRecords) {
-      announceStatus(sharedStatus.message || "Shared workspace unavailable. Viewing local cache only.");
+  async function handleArchiveChange(entryId: string, archived: boolean): Promise<void> {
+    if (dataSource === "desktop" && !canModifyEntries) {
+      announceStatus(sharedStatus.message || "Shared workspace unavailable. Saving changes locally.");
       return;
     }
 
-    const record = records.find((entry) => entry.id === recordId);
-    if (!record || record.archived === archived) {
+    const entry = entries.find((entry) => entry.id === entryId);
+    if (!entry || entry.archived === archived) {
       return;
     }
 
     const shouldProceed = window.confirm(
       archived
-        ? "Archive this record and move it out of the Inventory view?"
-        : "Restore this record and move it back into Inventory?",
+        ? "Archive this entry and move it out of the Inventory view?"
+        : "Restore this entry and move it back into Inventory?",
     );
     if (!shouldProceed) {
       return;
     }
 
-    if (dataSource === "desktop" && window.inventoryDesktop?.setArchived && isDatabaseRecordId(recordId)) {
+    if (dataSource === "desktop" && window.inventoryDesktop?.setArchivedEntry && isDatabaseEntryId(entryId)) {
       try {
-        const updatedRecord = await runDesktopMutation(() => window.inventoryDesktop!.setArchived(recordId, archived));
-        setRecords((current) => current.map((entry) => (entry.id === updatedRecord.id ? updatedRecord : entry)));
+        const updatedEntry = await runDesktopMutation(() => window.inventoryDesktop!.setArchivedEntry(entryId, archived));
+        setEntries((current) => current.map((entry) => (entry.id === updatedEntry.id ? updatedEntry : entry)));
       } catch {
         announceStatus("Could not update the shared inventory database.");
         return;
       }
     } else {
-      setRecords((current) =>
-        current.map((entry) => (entry.id === recordId ? { ...entry, archived, updatedAt: new Date().toISOString() } : entry)),
+      setEntries((current) =>
+        current.map((entry) => (entry.id === entryId ? { ...entry, archived, updatedAt: new Date().toISOString() } : entry)),
       );
     }
 
-    announceStatus(archived ? "Record moved to the archive." : "Record restored to inventory.");
+    announceStatus(archived ? "Entry moved to the archive." : "Entry restored to inventory.");
   }
 
-  async function handleDeleteRecord(recordId: string): Promise<void> {
-    if (dataSource === "desktop" && !canModifyRecords) {
-      announceStatus(sharedStatus.message || "Shared workspace unavailable. Viewing local cache only.");
+  async function handleDeleteEntry(entryId: string): Promise<void> {
+    if (dataSource === "desktop" && !canModifyEntries) {
+      announceStatus(sharedStatus.message || "Shared workspace unavailable. Saving changes locally.");
       return;
     }
 
-    const record = records.find((entry) => entry.id === recordId);
-    if (!record) {
+    const entry = entries.find((entry) => entry.id === entryId);
+    if (!entry) {
       return;
     }
 
-    const shouldProceed = window.confirm(`Delete this record?\n\n${record.description || record.manufacturer || `ID ${recordId}`}`);
+    const shouldProceed = window.confirm(`Delete this entry?\n\n${entry.description || entry.manufacturer || `ID ${entryId}`}`);
     if (!shouldProceed) {
       return;
     }
 
-    if (dataSource === "desktop" && window.inventoryDesktop?.deleteRecord && isDatabaseRecordId(recordId)) {
+    if (dataSource === "desktop" && window.inventoryDesktop?.deleteEntry && isDatabaseEntryId(entryId)) {
       try {
-        await runDesktopMutation(() => window.inventoryDesktop!.deleteRecord(recordId));
+        await runDesktopMutation(() => window.inventoryDesktop!.deleteEntry(entryId));
       } catch {
         announceStatus("Could not delete from the shared inventory database.");
         return;
       }
     }
 
-    setRecords((current) => current.filter((entry) => entry.id !== recordId));
-    announceStatus("Record deleted.");
+    setEntries((current) => current.filter((entry) => entry.id !== entryId));
+    announceStatus("Entry deleted.");
   }
 
   async function handleExportExcel(): Promise<void> {
@@ -442,15 +446,15 @@ export function InventoryPrototype() {
     announceStatus("HTML export is not implemented yet.");
   }
 
-  async function handleOpenRecordLink(recordId: string): Promise<void> {
-    const record = records.find((entry) => entry.id === recordId);
-    if (!record) {
+  async function handleOpenEntryLink(entryId: string): Promise<void> {
+    const entry = entries.find((entry) => entry.id === entryId);
+    if (!entry) {
       return;
     }
 
-    const linkText = record.links.trim();
+    const linkText = entry.links.trim();
     if (!linkText) {
-      announceStatus("No link is saved for this record.");
+      announceStatus("No link is saved for this entry.");
       return;
     }
 
@@ -469,15 +473,15 @@ export function InventoryPrototype() {
     announceStatus(`Opened link: ${linkText}`);
   }
 
-  async function handleSearchOnline(recordId: string): Promise<void> {
-    const record = records.find((entry) => entry.id === recordId);
-    if (!record) {
+  async function handleSearchOnline(entryId: string): Promise<void> {
+    const entry = entries.find((entry) => entry.id === entryId);
+    if (!entry) {
       return;
     }
 
-    const queryText = [record.manufacturer, record.model, record.description].filter((value) => value.trim()).join(" ").trim();
+    const queryText = [entry.manufacturer, entry.model, entry.description].filter((value) => value.trim()).join(" ").trim();
     if (!queryText) {
-      announceStatus("No searchable record details were found.");
+      announceStatus("No searchable entry details were found.");
       return;
     }
 
@@ -491,34 +495,34 @@ export function InventoryPrototype() {
     announceStatus(`Opened web search: ${queryText}`);
   }
 
-  async function handleContextAction(action: RecordContextAction): Promise<void> {
-    const recordId = contextMenu?.recordId;
+  async function handleContextAction(action: EntryContextAction): Promise<void> {
+    const entryId = contextMenu?.entryId;
     setContextMenu(null);
 
-    if (!recordId) {
+    if (!entryId) {
       return;
     }
 
     switch (action) {
       case "open":
-        handleOpenRecord(recordId);
+        handleOpenEntry(entryId);
         return;
       case "open-link":
-        await handleOpenRecordLink(recordId);
+        await handleOpenEntryLink(entryId);
         return;
       case "search-online":
-        await handleSearchOnline(recordId);
+        await handleSearchOnline(entryId);
         return;
       case "archive-toggle": {
-        const record = records.find((entry) => entry.id === recordId);
-        if (!record) {
+        const entry = entries.find((entry) => entry.id === entryId);
+        if (!entry) {
           return;
         }
-        await handleArchiveChange(recordId, !record.archived);
+        await handleArchiveChange(entryId, !entry.archived);
         return;
       }
       case "delete":
-        await handleDeleteRecord(recordId);
+        await handleDeleteEntry(entryId);
         return;
     }
   }
@@ -541,9 +545,9 @@ export function InventoryPrototype() {
       <main className="flex h-full min-h-0 flex-col overflow-hidden">
         <InventoryHeader
           archiveCount={counts.archive}
-          canModifyRecords={canModifyRecords}
+          canModifyEntries={canModifyEntries}
           inventoryCount={counts.inventory}
-          onAddRecord={handleAddRecord}
+          onAddEntry={handleAddEntry}
           onExportExcel={() => {
             void handleExportExcel();
           }}
@@ -577,23 +581,23 @@ export function InventoryPrototype() {
                 <section className="flex h-full min-h-0 flex-1 items-center justify-center rounded-3xl border border-border/70 bg-card/80 shadow-sm">
                   <div className="text-sm text-muted-foreground">Loading ME inventory database...</div>
                 </section>
-              ) : sortedRecords.length > 0 ? (
+              ) : sortedEntries.length > 0 ? (
                 <InventoryTable
-                  activeRecordId={contextMenu?.recordId ?? dialogRecord?.id ?? null}
-                  canModifyRecords={canModifyRecords}
+                  activeEntryId={contextMenu?.entryId ?? dialogEntry?.id ?? null}
+                  canModifyEntries={canModifyEntries}
                   colorRows={colorRows}
                   columns={visibleColumns}
                   onOpenContextMenu={handleOpenContextMenu}
-                  onOpenRecord={handleOpenRecord}
+                  onOpenEntry={handleOpenEntry}
                   onSortChange={handleSortChange}
-                  onToggleVerified={(recordId) => {
-                    void handleToggleVerified(recordId);
+                  onToggleVerified={(entryId) => {
+                    void handleToggleVerified(entryId);
                   }}
-                  records={sortedRecords}
+                  entries={sortedEntries}
                   sortState={sortState}
                 />
               ) : (
-                <EmptyResults query={query} scope={scope} onAddRecord={handleAddRecord} />
+                <EmptyResults query={query} scope={scope} onAddEntry={handleAddEntry} />
               )}
             </div>
           </div>
@@ -602,11 +606,11 @@ export function InventoryPrototype() {
         <StatusStrip message={statusMessage} />
       </main>
 
-      {contextMenu && contextRecord ? (
-        <RecordContextMenu
-          canModifyRecords={canModifyRecords}
+      {contextMenu && contextEntry ? (
+        <EntryContextMenu
+          canModifyEntries={canModifyEntries}
           position={{ x: contextMenu.x, y: contextMenu.y }}
-          record={contextRecord}
+          entry={contextEntry}
           scope={scope}
           onAction={(action) => {
             void handleContextAction(action);
@@ -616,14 +620,14 @@ export function InventoryPrototype() {
       ) : null}
 
       {dialogState ? (
-        <RecordDialog
-          key={`${dialogState.mode}-${dialogState.recordId ?? scope}`}
+        <EntryDialog
+          key={`${dialogState.mode}-${dialogState.entryId ?? scope}`}
           defaultArchived={scope === "archive"}
           mode={dialogState.mode}
-          readOnly={dataSource === "desktop" && !canModifyRecords}
-          record={dialogRecord}
+          readOnly={dataSource === "desktop" && !canModifyEntries}
+          entry={dialogEntry}
           onClose={() => setDialogState(null)}
-          onSave={handleSaveRecord}
+          onSave={handleSaveEntry}
         />
       ) : null}
     </div>
@@ -647,8 +651,8 @@ function buildDefaultStatusMessage(
   return `${summary} | ${sharedStatus.message}`;
 }
 
-function isDatabaseRecordId(recordId: string): boolean {
-  return /^\d+$/.test(recordId);
+function isDatabaseEntryId(entryId: string): boolean {
+  return /^\d+$/.test(entryId);
 }
 
 async function openExternalUrl(url: string): Promise<boolean> {
@@ -677,12 +681,12 @@ function normalizeExternalUrl(value: string): string | null {
   }
 }
 
-function buildLocalCreatedRecord(input: InventoryRecordInput): InventoryRecord {
+function buildLocalCreatedEntry(input: InventoryEntryInput): InventoryEntry {
   const timestamp = new Date().toISOString();
 
   return {
     id: `local-${Date.now()}`,
-    recordUuid: "",
+    entryUuid: "",
     assetNumber: input.assetNumber,
     serialNumber: input.serialNumber,
     qty: input.qty,
@@ -706,9 +710,9 @@ function buildLocalCreatedRecord(input: InventoryRecordInput): InventoryRecord {
   };
 }
 
-function buildLocalUpdatedRecord(existingRecord: InventoryRecord, input: InventoryRecordInput): InventoryRecord {
+function buildLocalUpdatedEntry(existingEntry: InventoryEntry, input: InventoryEntryInput): InventoryEntry {
   return {
-    ...existingRecord,
+    ...existingEntry,
     assetNumber: input.assetNumber,
     serialNumber: input.serialNumber,
     qty: input.qty,

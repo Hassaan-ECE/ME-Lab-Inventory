@@ -2,14 +2,15 @@ import { ChevronDownIcon, FileCodeIcon, FileSpreadsheetIcon, MoonIcon, PlusIcon,
 import { useEffect, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { APP_VERSION } from "@/branding";
 import { cn } from "@/lib/utils";
 import type { InventoryScope, ThemeMode } from "@/types/inventory";
 
 interface InventoryHeaderProps {
   archiveCount: number;
-  canModifyRecords: boolean;
+  canModifyEntries: boolean;
   inventoryCount: number;
-  onAddRecord: () => void;
+  onAddEntry: () => void;
   onExportExcel: () => void;
   onExportHtml: () => void;
   onScopeChange: (scope: InventoryScope) => void;
@@ -20,9 +21,9 @@ interface InventoryHeaderProps {
 
 export function InventoryHeader({
   archiveCount,
-  canModifyRecords,
+  canModifyEntries,
   inventoryCount,
-  onAddRecord,
+  onAddEntry,
   onExportExcel,
   onExportHtml,
   onScopeChange,
@@ -71,7 +72,10 @@ export function InventoryHeader({
   return (
     <header className="shrink-0 border-b border-border px-3 py-3 sm:px-5">
       <div className="flex flex-wrap items-center gap-3">
-        <h1 className="min-w-0 text-2xl font-semibold tracking-tight text-foreground">ME Lab Inventory</h1>
+        <div className="flex min-w-0 items-baseline gap-2">
+          <h1 className="min-w-0 text-2xl font-semibold tracking-tight text-foreground">ME Inventory</h1>
+          <span className="text-xs font-semibold text-muted-foreground">v{APP_VERSION}</span>
+        </div>
 
         <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
           <div className="inline-flex rounded-2xl border border-border/70 bg-card/80 p-1">
@@ -143,9 +147,9 @@ export function InventoryHeader({
               </div>
             ) : null}
           </div>
-          <Button disabled={!canModifyRecords} size="sm" onClick={onAddRecord}>
+          <Button disabled={!canModifyEntries} size="sm" onClick={onAddEntry}>
             <PlusIcon className="size-3.5" />
-            Add Record
+            Add Entry
           </Button>
         </div>
       </div>

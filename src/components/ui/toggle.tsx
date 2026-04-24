@@ -15,7 +15,7 @@ const toggleVariants = cva(
         outline: "border-input bg-background text-foreground hover:bg-accent/50 dark:bg-input/30 dark:hover:bg-input/60",
       },
       pressed: {
-        true: "bg-input/60",
+        true: "border-primary bg-primary text-primary-foreground shadow-sm hover:bg-primary/90",
         false: "",
       },
     },

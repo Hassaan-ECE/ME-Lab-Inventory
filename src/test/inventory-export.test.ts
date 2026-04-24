@@ -9,7 +9,7 @@ import { DatabaseSync } from "node:sqlite";
 import ExcelJS from "exceljs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const PROJECT_DB_PATH = path.resolve("data", "me_lab_inventory.db");
+const PROJECT_DB_PATH = path.resolve("data", "me_inventory.db");
 
 interface RuntimeContext {
   appPath: string;
@@ -51,7 +51,7 @@ describe("inventory Excel export", () => {
   beforeEach(async () => {
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "ims-export-"));
     fs.mkdirSync(path.join(tempDir, "data"), { recursive: true });
-    fs.copyFileSync(PROJECT_DB_PATH, path.join(tempDir, "data", "me_lab_inventory.db"));
+    fs.copyFileSync(PROJECT_DB_PATH, path.join(tempDir, "data", "me_inventory.db"));
     runtimeContext = {
       appPath: tempDir,
       isPackaged: false,
@@ -66,12 +66,12 @@ describe("inventory Excel export", () => {
   });
 
   it("writes a Python-style workbook with inventory, import issue, and summary sheets", async () => {
-    const outputPath = path.join(tempDir, "ME_Lab_Inventory_Export.xlsx");
+    const outputPath = path.join(tempDir, "ME_Inventory_Export.xlsx");
     const workbook = new ExcelJS.Workbook();
-    const db = new DatabaseSync(path.join(tempDir, "data", "me_lab_inventory.db"), { readOnly: true });
+    const db = new DatabaseSync(path.join(tempDir, "data", "me_inventory.db"), { readOnly: true });
 
-    const archivedRow = db.prepare("SELECT description FROM equipment WHERE is_archived = 1 LIMIT 1").get();
-    const activeRow = db.prepare("SELECT description FROM equipment WHERE is_archived = 0 LIMIT 1").get();
+    const archivedRow = db.prepare("SELECT description FROM entries WHERE is_archived = 1 LIMIT 1").get();
+    const activeRow = db.prepare("SELECT description FROM entries WHERE is_archived = 0 LIMIT 1").get();
     const counts = db
       .prepare(
         `
@@ -79,7 +79,7 @@ describe("inventory Excel export", () => {
             COUNT(*) AS total,
             SUM(CASE WHEN is_archived = 1 THEN 1 ELSE 0 END) AS archived,
             SUM(CASE WHEN verified_in_survey = 1 THEN 1 ELSE 0 END) AS verified
-          FROM equipment
+          FROM entries
         `,
       )
       .get();
@@ -111,9 +111,9 @@ describe("inventory Excel export", () => {
     expect(issueSheet?.getRow(1).values).toContain("Summary");
     expect(getWorksheetText(inventorySheet)).toContain(activeDescription);
     expect(getWorksheetText(inventorySheet)).toContain(archivedDescription);
-    expect(getSummaryValue(summarySheet, "Total Equipment Records")).toBe(totalCount);
-    expect(getSummaryValue(summarySheet, "Inventory View Records")).toBe(totalCount - archivedCount);
-    expect(getSummaryValue(summarySheet, "Archived Records")).toBe(archivedCount);
+    expect(getSummaryValue(summarySheet, "Total Entries")).toBe(totalCount);
+    expect(getSummaryValue(summarySheet, "Inventory View Entries")).toBe(totalCount - archivedCount);
+    expect(getSummaryValue(summarySheet, "Archived Entries")).toBe(archivedCount);
     expect(getSummaryValue(summarySheet, "Verified")).toBe(verifiedCount);
     expect(getSummaryValue(summarySheet, "Master List")).toBe("Machine Shop Material list.xlsx");
   });
@@ -153,7 +153,7 @@ describe("inventory Excel export", () => {
       showMessageBox,
       showSaveDialog: vi.fn().mockResolvedValue({
         canceled: false,
-        filePath: path.join(tempDir, "missing", "ME_Lab_Inventory_Export.xlsx"),
+        filePath: path.join(tempDir, "missing", "ME_Inventory_Export.xlsx"),
       }),
     });
 

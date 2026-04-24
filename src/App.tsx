@@ -1,5 +1,5 @@
-import { InventoryPrototype } from "@/components/inventory/InventoryPrototype";
+import { InventoryShell } from "@/components/inventory/InventoryShell";
 
 export function App() {
-  return <InventoryPrototype />;
+  return <InventoryShell />;
 }

@@ -1,8 +1,8 @@
 {
-  "name": "ims-t3code-ref-design",
+  "name": "me-inventory",
   "private": true,
-  "version": "0.1.0",
-  "description": "Standalone ME Lab inventory prototype with a T3-inspired desktop shell.",
+  "version": "0.9.0",
+  "description": "Standalone ME Inventory desktop app with a shared SQLite-backed workflow.",
   "author": "Syed Hassaan Shah",
   "type": "module",
   "main": "electron/main.mjs",
@@ -54,8 +54,8 @@
     "wait-on": "^9.0.5"
   },
   "build": {
-    "appId": "com.syedhassaan.ims-t3code-ref-design",
-    "productName": "ME Lab Inventory Prototype",
+    "appId": "com.syedhassaan.me-inventory",
+    "productName": "ME Inventory",
     "icon": "electron/assets/app_icon.ico",
     "directories": {
       "output": "release"

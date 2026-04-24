@@ -1,4 +1,4 @@
-import type { InventoryRecord, InventoryRecordInput, InventorySharedStatus } from "@/types/inventory";
+import type { InventoryEntry, InventoryEntryInput, InventorySharedStatus } from "@/types/inventory";
 
 declare global {
   interface Window {
@@ -6,19 +6,19 @@ declare global {
       isDesktop: boolean;
       loadInventory: () => Promise<{
         dbPath: string;
-        records: InventoryRecord[];
+        entries: InventoryEntry[];
         shared?: InventorySharedStatus;
       }>;
       syncInventory: () => Promise<{
         dbPath: string;
-        records: InventoryRecord[];
+        entries: InventoryEntry[];
         shared: InventorySharedStatus;
       }>;
-      toggleVerified: (recordId: string, nextVerified: boolean) => Promise<InventoryRecord>;
-      createRecord: (input: InventoryRecordInput) => Promise<InventoryRecord>;
-      updateRecord: (recordId: string, input: InventoryRecordInput) => Promise<InventoryRecord>;
-      setArchived: (recordId: string, archived: boolean) => Promise<InventoryRecord>;
-      deleteRecord: (recordId: string) => Promise<{ recordId: string }>;
+      toggleVerifiedEntry: (entryId: string, nextVerified: boolean) => Promise<InventoryEntry>;
+      createEntry: (input: InventoryEntryInput) => Promise<InventoryEntry>;
+      updateEntry: (entryId: string, input: InventoryEntryInput) => Promise<InventoryEntry>;
+      setArchivedEntry: (entryId: string, archived: boolean) => Promise<InventoryEntry>;
+      deleteEntry: (entryId: string) => Promise<{ entryId: string }>;
       openExternal: (url: string) => Promise<boolean>;
       openPath: (path: string) => Promise<boolean>;
       pickPicturePath: () => Promise<string | null>;

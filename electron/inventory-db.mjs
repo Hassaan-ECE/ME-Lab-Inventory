@@ -5,19 +5,23 @@ import { DatabaseSync } from "node:sqlite";
 
 import {
   SHARED_SYNC_INTERVAL_MS,
+  ensureInventorySchema,
   resolveDbPath,
   resolveSharedDbPath,
   resolveSharedDirectoryPath,
+  resolveLegacySharedDbPath,
   resolveSharedRootPath,
 } from "./inventory-runtime.mjs";
 
-const SHARED_UNAVAILABLE_MESSAGE = "Shared workspace unavailable. Viewing local cache only.";
+const SHARED_UNAVAILABLE_MESSAGE = "Shared workspace unavailable. Saving changes locally.";
 const SHARED_BUSY_MESSAGE = "Shared workspace busy, retry in a moment.";
 const SHARED_CONNECTED_MESSAGE = "Shared workspace connected.";
+const LOCAL_MUTATION_MARKER = "local_mutation";
+const SHARED_SYNC_MARKER = "shared_sync";
 
 const SELECT_FIELDS = `
-  record_id,
-  record_uuid,
+  entry_id,
+  entry_uuid,
   asset_number,
   serial_number,
   qty,
@@ -39,14 +43,14 @@ const SELECT_FIELDS = `
   created_at,
   updated_at
 `;
-const SELECT_SQL = `SELECT ${SELECT_FIELDS} FROM equipment ORDER BY updated_at DESC, record_id DESC`;
+const SELECT_SQL = `SELECT ${SELECT_FIELDS} FROM entries ORDER BY updated_at DESC, entry_id DESC`;
 
-export function loadInventoryRecords(runtimeContext) {
+export function loadInventoryEntries(runtimeContext) {
   const dbPath = resolveDbPath(runtimeContext);
   return {
     dbPath,
-    records: loadInventoryRecordsFromPath(dbPath),
-    shared: getSharedInventoryStatus(),
+    entries: loadInventoryEntriesFromPath(dbPath),
+    shared: getSharedInventoryStatus(dbPath),
   };
 }
 
@@ -55,16 +59,27 @@ export function syncInventoryWithShared(runtimeContext) {
 
   try {
     const sharedDbPath = ensureSharedDatabase(dbPath);
-    replaceDatabaseFile(sharedDbPath, dbPath);
-    const revision = ensureNumericRevision(dbPath, "local_sync");
+    const localRevision = ensureNumericRevision(dbPath, "local_sync_check");
+    const sharedRevision = ensureNumericRevision(sharedDbPath, "shared_sync_check");
+    const revision = Math.max(localRevision, sharedRevision);
+
+    if (localRevision > sharedRevision) {
+      replaceDatabaseFile(dbPath, sharedDbPath);
+    } else {
+      replaceDatabaseFile(sharedDbPath, dbPath);
+    }
+
+    setRevisionForPath(sharedDbPath, revision, SHARED_SYNC_MARKER);
+    setRevisionForPath(dbPath, revision, SHARED_SYNC_MARKER);
 
     return {
       dbPath,
-      records: loadInventoryRecordsFromPath(dbPath),
+      entries: loadInventoryEntriesFromPath(dbPath),
       shared: buildSharedStatus({
         available: true,
         canModify: true,
         message: SHARED_CONNECTED_MESSAGE,
+        mutationMode: "shared",
         revision,
         sharedDbPath,
       }),
@@ -72,32 +87,23 @@ export function syncInventoryWithShared(runtimeContext) {
   } catch (error) {
     return {
       dbPath,
-      records: loadInventoryRecordsFromPath(dbPath),
-      shared: buildUnavailableSharedStatus(error),
+      entries: loadInventoryEntriesFromPath(dbPath),
+      shared: buildUnavailableSharedStatus(error, dbPath),
     };
   }
 }
 
-export function getSharedInventoryStatus() {
+export function getSharedInventoryStatus(localDbPath = "") {
   const sharedRootPath = resolveSharedRootPath();
   const sharedDbPath = resolveSharedDbPath();
+  const legacySharedDbPath = resolveLegacySharedDbPath();
 
   if (!sharedRootPath) {
-    return buildSharedStatus({
-      available: false,
-      canModify: false,
-      message: "Shared workspace path is not configured.",
-      sharedDbPath,
-    });
+    return buildLocalSharedStatus("Shared workspace path is not configured. Saving changes locally.", localDbPath);
   }
 
   if (!fs.existsSync(sharedRootPath)) {
-    return buildSharedStatus({
-      available: false,
-      canModify: false,
-      message: SHARED_UNAVAILABLE_MESSAGE,
-      sharedDbPath,
-    });
+    return buildLocalSharedStatus(SHARED_UNAVAILABLE_MESSAGE, localDbPath);
   }
 
   return buildSharedStatus({
@@ -105,23 +111,25 @@ export function getSharedInventoryStatus() {
     canModify: true,
     message: fs.existsSync(sharedDbPath)
       ? SHARED_CONNECTED_MESSAGE
+      : fs.existsSync(legacySharedDbPath)
+        ? "Shared workspace connected; legacy shared database will be migrated."
       : "Shared workspace connected; shared database will be initialized.",
+    mutationMode: "shared",
     sharedDbPath,
   });
 }
 
-export function createInventoryRecord(runtimeContext, recordInput) {
+export function createInventoryEntry(runtimeContext, entryInput) {
   const dbPath = resolveDbPath(runtimeContext);
-  const sharedDbPath = ensureSharedDatabase(dbPath);
-  const record = normalizeRecordInput(recordInput);
-  const recordUuid = randomUUID();
+  const entry = normalizeEntryInput(entryInput);
+  const entryUuid = randomUUID();
 
-  validateRecordInput(record);
+  validateEntryInput(entry);
 
-  runSharedMutation(sharedDbPath, (db) => {
+  runEntryMutationWithSharedFallback(dbPath, (db) => {
     db.prepare(
       `
-        INSERT INTO equipment (
+        INSERT INTO entries (
           asset_number,
           serial_number,
           manufacturer,
@@ -141,69 +149,65 @@ export function createInventoryRecord(runtimeContext, recordInput) {
           is_archived,
           manual_entry,
           picture_path,
-          record_uuid,
+          entry_uuid,
           created_at,
           updated_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, datetime('now'), datetime('now'))
       `,
     ).run(
-      record.assetNumber,
-      record.serialNumber,
-      record.manufacturer,
-      record.manufacturer,
-      record.model,
-      record.description,
-      record.qty,
-      record.location,
-      record.assignedTo,
-      record.lifecycleStatus,
-      record.workingStatus,
-      record.condition,
-      record.projectName,
-      record.links,
-      record.notes,
-      record.verifiedInSurvey ? 1 : 0,
-      record.archived ? 1 : 0,
-      record.picturePath,
-      recordUuid,
+      entry.assetNumber,
+      entry.serialNumber,
+      entry.manufacturer,
+      entry.manufacturer,
+      entry.model,
+      entry.description,
+      entry.qty,
+      entry.location,
+      entry.assignedTo,
+      entry.lifecycleStatus,
+      entry.workingStatus,
+      entry.condition,
+      entry.projectName,
+      entry.links,
+      entry.notes,
+      entry.verifiedInSurvey ? 1 : 0,
+      entry.archived ? 1 : 0,
+      entry.picturePath,
+      entryUuid,
     );
   });
 
-  replaceDatabaseFile(sharedDbPath, dbPath);
-  return selectRecordByUuidFromPath(dbPath, recordUuid);
+  return selectEntryByUuidFromPath(dbPath, entryUuid);
 }
 
-export function toggleVerifiedRecord(runtimeContext, recordId, nextVerified) {
+export function toggleVerifiedEntry(runtimeContext, entryId, nextVerified) {
   const dbPath = resolveDbPath(runtimeContext);
-  const sharedDbPath = ensureSharedDatabase(dbPath);
-  const selector = resolveRecordSelector(dbPath, recordId);
+  const selector = resolveEntrySelector(dbPath, entryId);
 
-  runSharedMutation(sharedDbPath, (db) => {
+  runEntryMutationWithSharedFallback(dbPath, (db) => {
     db.prepare(
       `
-        UPDATE equipment
+        UPDATE entries
         SET verified_in_survey = ?, updated_at = datetime('now')
         WHERE ${selector.whereSql}
       `,
     ).run(nextVerified ? 1 : 0, selector.value);
   });
 
-  replaceDatabaseFile(sharedDbPath, dbPath);
-  return selectRecordBySelectorFromPath(dbPath, selector);
+  return selectEntryBySelectorFromPath(dbPath, selector);
 }
 
-export function updateInventoryRecord(runtimeContext, recordId, recordInput) {
+export function updateInventoryEntry(runtimeContext, entryId, entryInput) {
   const dbPath = resolveDbPath(runtimeContext);
-  const sharedDbPath = ensureSharedDatabase(dbPath);
-  const selector = resolveRecordSelector(dbPath, recordId);
-  const record = normalizeRecordInput(recordInput);
+  const selector = resolveEntrySelector(dbPath, entryId);
+  const entry = normalizeEntryInput(entryInput);
 
-  validateRecordInput(record);
+  validateEntryInput(entry);
 
-  runSharedMutation(sharedDbPath, (db) => {
+  runEntryMutationWithSharedFallback(dbPath, (db) => {
     db.prepare(
       `
-        UPDATE equipment
+        UPDATE entries
         SET
           asset_number = ?,
           serial_number = ?,
@@ -227,72 +231,83 @@ export function updateInventoryRecord(runtimeContext, recordId, recordInput) {
         WHERE ${selector.whereSql}
       `,
     ).run(
-      record.assetNumber,
-      record.serialNumber,
-      record.manufacturer,
-      record.manufacturer,
-      record.model,
-      record.description,
-      record.qty,
-      record.location,
-      record.assignedTo,
-      record.lifecycleStatus,
-      record.workingStatus,
-      record.condition,
-      record.projectName,
-      record.links,
-      record.notes,
-      record.verifiedInSurvey ? 1 : 0,
-      record.archived ? 1 : 0,
-      record.picturePath,
+      entry.assetNumber,
+      entry.serialNumber,
+      entry.manufacturer,
+      entry.manufacturer,
+      entry.model,
+      entry.description,
+      entry.qty,
+      entry.location,
+      entry.assignedTo,
+      entry.lifecycleStatus,
+      entry.workingStatus,
+      entry.condition,
+      entry.projectName,
+      entry.links,
+      entry.notes,
+      entry.verifiedInSurvey ? 1 : 0,
+      entry.archived ? 1 : 0,
+      entry.picturePath,
       selector.value,
     );
   });
 
-  replaceDatabaseFile(sharedDbPath, dbPath);
-  return selectRecordBySelectorFromPath(dbPath, selector);
+  return selectEntryBySelectorFromPath(dbPath, selector);
 }
 
-export function setArchivedRecord(runtimeContext, recordId, archived) {
+export function setArchivedEntry(runtimeContext, entryId, archived) {
   const dbPath = resolveDbPath(runtimeContext);
-  const sharedDbPath = ensureSharedDatabase(dbPath);
-  const selector = resolveRecordSelector(dbPath, recordId);
+  const selector = resolveEntrySelector(dbPath, entryId);
 
-  runSharedMutation(sharedDbPath, (db) => {
+  runEntryMutationWithSharedFallback(dbPath, (db) => {
     db.prepare(
       `
-        UPDATE equipment
+        UPDATE entries
         SET is_archived = ?, updated_at = datetime('now')
         WHERE ${selector.whereSql}
       `,
     ).run(archived ? 1 : 0, selector.value);
   });
 
-  replaceDatabaseFile(sharedDbPath, dbPath);
-  return selectRecordBySelectorFromPath(dbPath, selector);
+  return selectEntryBySelectorFromPath(dbPath, selector);
 }
 
-export function deleteInventoryRecord(runtimeContext, recordId) {
+export function deleteInventoryEntry(runtimeContext, entryId) {
   const dbPath = resolveDbPath(runtimeContext);
-  const sharedDbPath = ensureSharedDatabase(dbPath);
-  const selector = resolveRecordSelector(dbPath, recordId);
+  const selector = resolveEntrySelector(dbPath, entryId);
 
-  runSharedMutation(sharedDbPath, (db) => {
-    db.prepare(`DELETE FROM equipment WHERE ${selector.whereSql}`).run(selector.value);
+  runEntryMutationWithSharedFallback(dbPath, (db) => {
+    db.prepare(`DELETE FROM entries WHERE ${selector.whereSql}`).run(selector.value);
   });
 
-  replaceDatabaseFile(sharedDbPath, dbPath);
-  return { recordId: String(recordId) };
+  return { entryId: String(entryId) };
 }
 
-function loadInventoryRecordsFromPath(dbPath) {
+function loadInventoryEntriesFromPath(dbPath) {
   const db = new DatabaseSync(dbPath, { readOnly: true });
 
   try {
     const rows = db.prepare(SELECT_SQL).all();
-    return rows.map(mapEquipmentRow);
+    return rows.map(mapEntryRow);
   } finally {
     db.close();
+  }
+}
+
+function runEntryMutationWithSharedFallback(localDbPath, mutate) {
+  try {
+    const sharedDbPath = ensureSharedDatabase(localDbPath);
+    runSharedMutation(sharedDbPath, mutate);
+    replaceDatabaseFile(sharedDbPath, localDbPath);
+    return { mutationMode: "shared", sharedDbPath };
+  } catch (error) {
+    if (!isSharedSetupUnavailableError(error)) {
+      throw error;
+    }
+
+    runLocalMutation(localDbPath, mutate);
+    return { mutationMode: "local", sharedDbPath: resolveSharedDbPath() };
   }
 }
 
@@ -300,6 +315,7 @@ function ensureSharedDatabase(localDbPath) {
   const sharedRootPath = resolveSharedRootPath();
   const sharedDirectoryPath = resolveSharedDirectoryPath();
   const sharedDbPath = resolveSharedDbPath();
+  const legacySharedDbPath = resolveLegacySharedDbPath();
 
   if (!sharedRootPath || !sharedDirectoryPath || !sharedDbPath) {
     throw new Error("Shared workspace path is not configured.");
@@ -311,9 +327,18 @@ function ensureSharedDatabase(localDbPath) {
 
   fs.mkdirSync(sharedDirectoryPath, { recursive: true });
 
+  if (!fs.existsSync(sharedDbPath) && fs.existsSync(legacySharedDbPath)) {
+    replaceDatabaseFile(legacySharedDbPath, sharedDbPath);
+  }
+
+  ensureInventorySchema(localDbPath);
+  if (fs.existsSync(sharedDbPath)) {
+    ensureInventorySchema(sharedDbPath);
+  }
+
   const shouldBootstrap =
     !fs.existsSync(sharedDbPath) ||
-    (getEquipmentCount(sharedDbPath) === 0 && getEquipmentCount(localDbPath) > 0);
+    (getEntryCount(sharedDbPath) === 0 && getEntryCount(localDbPath) > 0);
 
   if (shouldBootstrap) {
     replaceDatabaseFile(localDbPath, sharedDbPath);
@@ -351,6 +376,30 @@ function runSharedMutation(sharedDbPath, mutate) {
   }
 }
 
+function runLocalMutation(localDbPath, mutate) {
+  ensureInventorySchema(localDbPath);
+  const db = new DatabaseSync(localDbPath);
+
+  try {
+    db.exec("PRAGMA journal_mode=DELETE");
+    db.exec("PRAGMA synchronous=FULL");
+    db.exec("BEGIN IMMEDIATE");
+    mutate(db);
+    incrementLocalRevision(db);
+    db.exec("COMMIT");
+  } catch (error) {
+    try {
+      db.exec("ROLLBACK");
+    } catch {
+      // Ignore rollback errors when SQLite already closed the transaction.
+    }
+
+    throw error;
+  } finally {
+    db.close();
+  }
+}
+
 function replaceDatabaseFile(sourcePath, targetPath) {
   if (isSamePath(sourcePath, targetPath)) {
     return;
@@ -376,21 +425,22 @@ function isSamePath(leftPath, rightPath) {
   return path.resolve(leftPath).toLowerCase() === path.resolve(rightPath).toLowerCase();
 }
 
-function getEquipmentCount(dbPath) {
+function getEntryCount(dbPath) {
   if (!fs.existsSync(dbPath)) {
     return 0;
   }
 
+  ensureInventorySchema(dbPath);
   const db = new DatabaseSync(dbPath, { readOnly: true });
 
   try {
     const tableRow = db
-      .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'equipment' LIMIT 1")
+      .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'entries' LIMIT 1")
       .get();
     if (!tableRow) {
       return 0;
     }
-    const countRow = db.prepare("SELECT COUNT(*) AS count FROM equipment").get();
+    const countRow = db.prepare("SELECT COUNT(*) AS count FROM entries").get();
     return Number(countRow?.count ?? 0);
   } finally {
     db.close();
@@ -407,6 +457,16 @@ function ensureNumericRevision(dbPath, updatedBy) {
   }
 }
 
+function setRevisionForPath(dbPath, revision, updatedBy) {
+  const db = new DatabaseSync(dbPath);
+
+  try {
+    setRevision(db, revision, updatedBy);
+  } finally {
+    db.close();
+  }
+}
+
 function ensureNumericRevisionForDb(db, updatedBy) {
   const row = db.prepare("SELECT revision FROM sync_state WHERE id = 1 LIMIT 1").get();
   const revision = parseRevision(row?.revision);
@@ -414,8 +474,8 @@ function ensureNumericRevisionForDb(db, updatedBy) {
     return revision;
   }
 
-  const recordCount = Number(db.prepare("SELECT COUNT(*) AS count FROM equipment").get()?.count ?? 0);
-  const normalizedRevision = recordCount > 0 ? 1 : 0;
+  const entryCount = Number(db.prepare("SELECT COUNT(*) AS count FROM entries").get()?.count ?? 0);
+  const normalizedRevision = entryCount > 0 ? 1 : 0;
   setRevision(db, normalizedRevision, updatedBy);
   return normalizedRevision;
 }
@@ -423,7 +483,14 @@ function ensureNumericRevisionForDb(db, updatedBy) {
 function incrementSharedRevision(db) {
   const currentRevision = ensureNumericRevisionForDb(db, "mutation");
   const nextRevision = currentRevision + 1;
-  setRevision(db, nextRevision, "ME Lab Inventory");
+  setRevision(db, nextRevision, "ME Inventory");
+  return nextRevision;
+}
+
+function incrementLocalRevision(db) {
+  const currentRevision = ensureNumericRevisionForDb(db, LOCAL_MUTATION_MARKER);
+  const nextRevision = currentRevision + 1;
+  setRevision(db, nextRevision, LOCAL_MUTATION_MARKER);
   return nextRevision;
 }
 
@@ -445,17 +512,28 @@ function parseRevision(value) {
   return Number.isFinite(revision) && revision > 0 ? revision : 0;
 }
 
-function resolveRecordSelector(dbPath, recordId) {
-  const numericRecordId = parseRecordId(recordId);
+function isSharedSetupUnavailableError(error) {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  return (
+    error.message === SHARED_UNAVAILABLE_MESSAGE ||
+    error.message === "Shared workspace path is not configured."
+  );
+}
+
+function resolveEntrySelector(dbPath, entryId) {
+  const numericEntryId = parseEntryId(entryId);
   const db = new DatabaseSync(dbPath, { readOnly: true });
 
   try {
-    const row = db.prepare("SELECT record_uuid FROM equipment WHERE record_id = ? LIMIT 1").get(numericRecordId);
-    const recordUuid = String(row?.record_uuid ?? "").trim();
-    if (recordUuid) {
+    const row = db.prepare("SELECT entry_uuid FROM entries WHERE entry_id = ? LIMIT 1").get(numericEntryId);
+    const entryUuid = String(row?.entry_uuid ?? "").trim();
+    if (entryUuid) {
       return {
-        value: recordUuid,
-        whereSql: "record_uuid = ?",
+        value: entryUuid,
+        whereSql: "entry_uuid = ?",
         type: "uuid",
       };
     }
@@ -464,46 +542,70 @@ function resolveRecordSelector(dbPath, recordId) {
   }
 
   return {
-    value: numericRecordId,
-    whereSql: "record_id = ?",
+    value: numericEntryId,
+    whereSql: "entry_id = ?",
     type: "id",
   };
 }
 
-function selectRecordByUuidFromPath(dbPath, recordUuid) {
+function selectEntryByUuidFromPath(dbPath, entryUuid) {
   const db = new DatabaseSync(dbPath, { readOnly: true });
 
   try {
-    const row = db.prepare(`SELECT ${SELECT_FIELDS} FROM equipment WHERE record_uuid = ? LIMIT 1`).get(recordUuid);
+    const row = db.prepare(`SELECT ${SELECT_FIELDS} FROM entries WHERE entry_uuid = ? LIMIT 1`).get(entryUuid);
     if (!row) {
-      throw new Error("Record not found after database update.");
+      throw new Error("Entry not found after database update.");
     }
-    return mapEquipmentRow(row);
+    return mapEntryRow(row);
   } finally {
     db.close();
   }
 }
 
-function selectRecordBySelectorFromPath(dbPath, selector) {
+function selectEntryBySelectorFromPath(dbPath, selector) {
   const db = new DatabaseSync(dbPath, { readOnly: true });
 
   try {
-    const row = db.prepare(`SELECT ${SELECT_FIELDS} FROM equipment WHERE ${selector.whereSql} LIMIT 1`).get(selector.value);
+    const row = db.prepare(`SELECT ${SELECT_FIELDS} FROM entries WHERE ${selector.whereSql} LIMIT 1`).get(selector.value);
     if (!row) {
-      throw new Error("Record not found after database update.");
+      throw new Error("Entry not found after database update.");
     }
-    return mapEquipmentRow(row);
+    return mapEntryRow(row);
   } finally {
     db.close();
   }
 }
 
-function buildUnavailableSharedStatus(error) {
+function buildUnavailableSharedStatus(error, localDbPath = "") {
   const message = error instanceof Error && error.message ? error.message : SHARED_UNAVAILABLE_MESSAGE;
+  if (isSharedSetupUnavailableError(error)) {
+    return buildLocalSharedStatus(
+      message === "Shared workspace path is not configured."
+        ? "Shared workspace path is not configured. Saving changes locally."
+        : SHARED_UNAVAILABLE_MESSAGE,
+      localDbPath,
+    );
+  }
+
   return buildSharedStatus({
     available: false,
     canModify: false,
     message,
+    mutationMode: "local",
+    sharedDbPath: resolveSharedDbPath(),
+  });
+}
+
+function buildLocalSharedStatus(message, localDbPath) {
+  const revisionInfo = getRevisionInfo(localDbPath);
+
+  return buildSharedStatus({
+    available: false,
+    canModify: true,
+    hasLocalOnlyChanges: revisionInfo.updatedBy === LOCAL_MUTATION_MARKER,
+    message,
+    mutationMode: "local",
+    revision: revisionInfo.revision,
     sharedDbPath: resolveSharedDbPath(),
   });
 }
@@ -511,7 +613,9 @@ function buildUnavailableSharedStatus(error) {
 function buildSharedStatus({
   available,
   canModify,
+  hasLocalOnlyChanges = false,
   message,
+  mutationMode = available ? "shared" : "local",
   revision = 0,
   sharedDbPath = resolveSharedDbPath(),
 }) {
@@ -519,7 +623,9 @@ function buildSharedStatus({
     available,
     canModify,
     enabled: true,
+    hasLocalOnlyChanges,
     message,
+    mutationMode,
     revision: String(revision || ""),
     sharedDbPath,
     sharedRootPath: resolveSharedRootPath(),
@@ -527,10 +633,28 @@ function buildSharedStatus({
   };
 }
 
-function mapEquipmentRow(row) {
+function getRevisionInfo(dbPath) {
+  if (!dbPath || !fs.existsSync(dbPath)) {
+    return { revision: 0, updatedBy: "" };
+  }
+
+  const db = new DatabaseSync(dbPath, { readOnly: true });
+
+  try {
+    const row = db.prepare("SELECT revision, global_mutation_at FROM sync_state WHERE id = 1 LIMIT 1").get();
+    return {
+      revision: parseRevision(row?.revision),
+      updatedBy: String(row?.global_mutation_at ?? ""),
+    };
+  } finally {
+    db.close();
+  }
+}
+
+function mapEntryRow(row) {
   return {
-    id: String(row.record_id ?? ""),
-    recordUuid: String(row.record_uuid ?? ""),
+    id: String(row.entry_id ?? ""),
+    entryUuid: String(row.entry_uuid ?? ""),
     assetNumber: String(row.asset_number ?? ""),
     serialNumber: String(row.serial_number ?? ""),
     qty: row.qty == null ? null : Number(row.qty),
@@ -554,38 +678,38 @@ function mapEquipmentRow(row) {
   };
 }
 
-function parseRecordId(recordId) {
-  const numericRecordId = Number(recordId);
-  if (!Number.isInteger(numericRecordId)) {
-    throw new Error("Invalid database record id.");
+function parseEntryId(entryId) {
+  const numericEntryId = Number(entryId);
+  if (!Number.isInteger(numericEntryId)) {
+    throw new Error("Invalid database entry id.");
   }
-  return numericRecordId;
+  return numericEntryId;
 }
 
-function normalizeRecordInput(recordInput) {
+function normalizeEntryInput(entryInput) {
   return {
-    assetNumber: normalizeText(recordInput?.assetNumber),
-    serialNumber: normalizeText(recordInput?.serialNumber),
-    qty: normalizeQty(recordInput?.qty),
-    manufacturer: normalizeText(recordInput?.manufacturer),
-    model: normalizeText(recordInput?.model),
-    description: normalizeText(recordInput?.description),
-    projectName: normalizeText(recordInput?.projectName),
-    location: normalizeText(recordInput?.location),
-    assignedTo: normalizeText(recordInput?.assignedTo),
-    links: normalizeText(recordInput?.links),
-    notes: normalizeText(recordInput?.notes),
-    lifecycleStatus: normalizeEnum(recordInput?.lifecycleStatus, ["active", "repair", "scrapped", "missing", "rental"], "active"),
-    workingStatus: normalizeEnum(recordInput?.workingStatus, ["unknown", "working", "limited", "not_working"], "unknown"),
-    condition: normalizeText(recordInput?.condition),
-    verifiedInSurvey: Boolean(recordInput?.verifiedInSurvey),
-    archived: Boolean(recordInput?.archived),
-    picturePath: normalizeText(recordInput?.picturePath),
+    assetNumber: normalizeText(entryInput?.assetNumber),
+    serialNumber: normalizeText(entryInput?.serialNumber),
+    qty: normalizeQty(entryInput?.qty),
+    manufacturer: normalizeText(entryInput?.manufacturer),
+    model: normalizeText(entryInput?.model),
+    description: normalizeText(entryInput?.description),
+    projectName: normalizeText(entryInput?.projectName),
+    location: normalizeText(entryInput?.location),
+    assignedTo: normalizeText(entryInput?.assignedTo),
+    links: normalizeText(entryInput?.links),
+    notes: normalizeText(entryInput?.notes),
+    lifecycleStatus: normalizeEnum(entryInput?.lifecycleStatus, ["active", "repair", "scrapped", "missing", "rental"], "active"),
+    workingStatus: normalizeEnum(entryInput?.workingStatus, ["unknown", "working", "limited", "not_working"], "unknown"),
+    condition: normalizeText(entryInput?.condition),
+    verifiedInSurvey: Boolean(entryInput?.verifiedInSurvey),
+    archived: Boolean(entryInput?.archived),
+    picturePath: normalizeText(entryInput?.picturePath),
   };
 }
 
-function validateRecordInput(record) {
-  if (!record.assetNumber && !record.serialNumber && !record.manufacturer && !record.model && !record.description) {
+function validateEntryInput(entry) {
+  if (!entry.assetNumber && !entry.serialNumber && !entry.manufacturer && !entry.model && !entry.description) {
     throw new Error("Provide at least an asset number, serial number, manufacturer, model, or description.");
   }
 }

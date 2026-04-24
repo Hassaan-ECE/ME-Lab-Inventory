@@ -1,6 +1,6 @@
-import type { InventoryRecord } from "@/types/inventory";
+import type { InventoryEntry } from "@/types/inventory";
 
-export const MOCK_INVENTORY: InventoryRecord[] = [
+export const MOCK_INVENTORY: InventoryEntry[] = [
   {
     id: "me-1001",
     assetNumber: "ME-1001",
@@ -146,7 +146,7 @@ export const MOCK_INVENTORY: InventoryRecord[] = [
     description: "Linear rail spare kit",
     projectName: "Automation Cell",
     location: "Project Shelf 3",
-    links: "https://vention.io/parts/automation/gantry-rail-kit/long-configuration-reference-with-multiple-paths-and-query?sku=rail-kit-automation-prototype-demo",
+    links: "https://vention.io/parts/automation/gantry-rail-kit/long-configuration-reference-with-multiple-paths-and-query?sku=rail-kit-automation-entry-demo",
     notes: "Kept for future cell expansion.",
     lifecycleStatus: "rental",
     workingStatus: "working",

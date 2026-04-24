@@ -2,7 +2,7 @@ import type {
   ColumnConfig,
   ColumnKey,
   FilterState,
-  InventoryRecord,
+  InventoryEntry,
   InventoryScope,
   SortState,
 } from "@/types/inventory";
@@ -58,19 +58,19 @@ export function formatLinkLabel(link: string): string {
   }
 }
 
-export function getInventoryCounts(records: InventoryRecord[]): {
+export function getInventoryCounts(entries: InventoryEntry[]): {
   inventory: number;
   archive: number;
   total: number;
   verified: number;
 } {
-  const archive = records.filter((record) => record.archived).length;
-  const verified = records.filter((record) => record.verifiedInSurvey).length;
+  const archive = entries.filter((entry) => entry.archived).length;
+  const verified = entries.filter((entry) => entry.verifiedInSurvey).length;
 
   return {
-    inventory: records.length - archive,
+    inventory: entries.length - archive,
     archive,
-    total: records.length,
+    total: entries.length,
     verified,
   };
 }
@@ -79,28 +79,28 @@ export function hasActiveFilters(filters: FilterState): boolean {
   return Object.values(filters).some((value) => value.trim().length > 0);
 }
 
-export function filterRecords(
-  records: InventoryRecord[],
+export function filterEntries(
+  entries: InventoryEntry[],
   scope: InventoryScope,
   query: string,
   filters: FilterState,
-): InventoryRecord[] {
+): InventoryEntry[] {
   const normalizedQuery = query.trim().toLowerCase();
 
-  return records.filter((record) => {
-    if (scope === "inventory" && record.archived) {
+  return entries.filter((entry) => {
+    if (scope === "inventory" && entry.archived) {
       return false;
     }
-    if (scope === "archive" && !record.archived) {
+    if (scope === "archive" && !entry.archived) {
       return false;
     }
 
     const fieldFiltersMatch =
-      includesText(record.assetNumber, filters.assetNumber) &&
-      includesText(record.manufacturer, filters.manufacturer) &&
-      includesText(record.model, filters.model) &&
-      includesText(record.description, filters.description) &&
-      includesText(record.location, filters.location);
+      includesText(entry.assetNumber, filters.assetNumber) &&
+      includesText(entry.manufacturer, filters.manufacturer) &&
+      includesText(entry.model, filters.model) &&
+      includesText(entry.description, filters.description) &&
+      includesText(entry.location, filters.location);
 
     if (!fieldFiltersMatch) {
       return false;
@@ -111,25 +111,25 @@ export function filterRecords(
     }
 
     return [
-      record.assetNumber,
-      record.serialNumber ?? "",
-      record.manufacturer,
-      record.model,
-      record.description,
-      record.projectName,
-      record.location,
-      record.links,
-      record.notes,
-      record.lifecycleStatus,
-      record.workingStatus,
+      entry.assetNumber,
+      entry.serialNumber ?? "",
+      entry.manufacturer,
+      entry.model,
+      entry.description,
+      entry.projectName,
+      entry.location,
+      entry.links,
+      entry.notes,
+      entry.lifecycleStatus,
+      entry.workingStatus,
     ].some((value) => value.toLowerCase().includes(normalizedQuery));
   });
 }
 
-export function sortRecords(records: InventoryRecord[], sortState: SortState): InventoryRecord[] {
+export function sortEntries(entries: InventoryEntry[], sortState: SortState): InventoryEntry[] {
   const multiplier = sortState.direction === "asc" ? 1 : -1;
 
-  return [...records].sort((left, right) => {
+  return [...entries].sort((left, right) => {
     const leftValue = getSortValue(left, sortState.column);
     const rightValue = getSortValue(right, sortState.column);
     const leftBlank = isBlankValue(leftValue);
@@ -165,12 +165,12 @@ export function buildResultsLabel(
 
   if (!trimmedQuery) {
     if (scope === "archive" && count === 0 && !filtersActive) {
-      return "No archived records yet";
+      return "No archived entries yet";
     }
     if (filtersActive) {
-      return `Showing ${count} filtered ${scope === "archive" ? "archived" : "equipment"} records`;
+      return scope === "archive" ? `Showing ${count} filtered archived entries` : `Showing ${count} filtered entries`;
     }
-    return `Showing all ${count} ${scope === "archive" ? "archived" : "equipment"} records`;
+    return scope === "archive" ? `Showing all ${count} archived entries` : `Showing all ${count} entries`;
   }
 
   if (count === 0) {
@@ -195,26 +195,26 @@ function includesText(value: string, filterValue: string): boolean {
   return value.toLowerCase().includes(filter);
 }
 
-function getSortValue(record: InventoryRecord, column: ColumnKey): number | string {
+function getSortValue(entry: InventoryEntry, column: ColumnKey): number | string {
   switch (column) {
     case "verified":
-      return record.verifiedInSurvey ? 1 : 0;
+      return entry.verifiedInSurvey ? 1 : 0;
     case "qty":
-      return record.qty ?? Number.POSITIVE_INFINITY;
+      return entry.qty ?? Number.POSITIVE_INFINITY;
     case "assetNumber":
-      return record.assetNumber.trim().toLowerCase();
+      return entry.assetNumber.trim().toLowerCase();
     case "manufacturer":
-      return record.manufacturer.trim().toLowerCase();
+      return entry.manufacturer.trim().toLowerCase();
     case "model":
-      return record.model.trim().toLowerCase();
+      return entry.model.trim().toLowerCase();
     case "description":
-      return record.description.trim().toLowerCase();
+      return entry.description.trim().toLowerCase();
     case "projectName":
-      return record.projectName.trim().toLowerCase();
+      return entry.projectName.trim().toLowerCase();
     case "location":
-      return record.location.trim().toLowerCase();
+      return entry.location.trim().toLowerCase();
     case "links":
-      return formatLinkLabel(record.links).toLowerCase();
+      return formatLinkLabel(entry.links).toLowerCase();
   }
 }
 

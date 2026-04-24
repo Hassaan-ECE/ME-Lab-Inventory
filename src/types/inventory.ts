@@ -7,7 +7,7 @@ export type WorkingStatus = "working" | "limited" | "not_working" | "unknown";
 export const LIFECYCLE_OPTIONS = ["active", "repair", "scrapped", "missing", "rental"] as const satisfies readonly LifecycleStatus[];
 export const WORKING_STATUS_OPTIONS = ["unknown", "working", "limited", "not_working"] as const satisfies readonly WorkingStatus[];
 
-export interface InventoryRecord {
+export interface InventoryEntry {
   id: string;
   assetNumber: string;
   serialNumber?: string;
@@ -27,12 +27,12 @@ export interface InventoryRecord {
   archived: boolean;
   createdAt?: string;
   updatedAt: string;
-  recordUuid?: string;
+  entryUuid?: string;
   manualEntry?: boolean;
   picturePath?: string;
 }
 
-export interface InventoryRecordInput {
+export interface InventoryEntryInput {
   assetNumber: string;
   serialNumber: string;
   qty: number | null;
@@ -56,7 +56,9 @@ export interface InventorySharedStatus {
   available: boolean;
   canModify: boolean;
   enabled: boolean;
+  hasLocalOnlyChanges?: boolean;
   message: string;
+  mutationMode?: "shared" | "local";
   revision?: string;
   sharedDbPath?: string;
   sharedRootPath?: string;

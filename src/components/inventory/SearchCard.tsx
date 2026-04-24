@@ -34,8 +34,8 @@ export function SearchCard({
         inputClassName="h-12 px-4 text-base leading-12"
         placeholder={
           scope === "archive"
-            ? "Search archived records — manufacturer, model, description, location, or notes"
-            : 'Search equipment — type anything: model, serial, manufacturer, location, "scrapped", "calibrated"...'
+            ? "Search archived entries by asset, serial, maker, model, description, location, or notes"
+            : "Search entries by asset, serial, maker, model, description, location, status, or notes"
         }
         value={query}
         onChange={(event) => onQueryChange(event.currentTarget.value)}

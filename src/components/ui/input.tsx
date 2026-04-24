@@ -16,7 +16,7 @@ export function Input({ className, inputClassName, ...props }: InputProps) {
     >
       <input
         className={cn(
-          "h-8.5 w-full rounded-[inherit] bg-transparent px-3 leading-8.5 outline-none placeholder:text-muted-foreground/72",
+          "relative z-10 h-8.5 w-full rounded-[inherit] bg-transparent px-3 leading-8.5 outline-none placeholder:text-muted-foreground/72",
           inputClassName,
         )}
         {...props}

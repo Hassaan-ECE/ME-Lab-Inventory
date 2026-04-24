@@ -4,31 +4,31 @@ import type { CSSProperties } from "react";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { formatLinkLabel } from "@/lib/inventory";
-import type { ColumnConfig, InventoryRecord, SortState } from "@/types/inventory";
+import type { ColumnConfig, InventoryEntry, SortState } from "@/types/inventory";
 
 interface InventoryTableProps {
-  activeRecordId?: string | null;
-  canModifyRecords: boolean;
+  activeEntryId?: string | null;
+  canModifyEntries: boolean;
   colorRows: boolean;
   columns: readonly ColumnConfig[];
-  onOpenContextMenu: (recordId: string, clientX: number, clientY: number) => void;
-  onOpenRecord: (recordId: string) => void;
+  onOpenContextMenu: (entryId: string, clientX: number, clientY: number) => void;
+  onOpenEntry: (entryId: string) => void;
   onSortChange: (columnKey: ColumnConfig["key"]) => void;
-  onToggleVerified: (recordId: string) => void;
-  records: InventoryRecord[];
+  onToggleVerified: (entryId: string) => void;
+  entries: InventoryEntry[];
   sortState: SortState;
 }
 
 export function InventoryTable({
-  activeRecordId = null,
-  canModifyRecords,
+  activeEntryId = null,
+  canModifyEntries,
   colorRows,
   columns,
   onOpenContextMenu,
-  onOpenRecord,
+  onOpenEntry,
   onSortChange,
   onToggleVerified,
-  records,
+  entries,
   sortState,
 }: InventoryTableProps) {
   return (
@@ -72,34 +72,34 @@ export function InventoryTable({
             </tr>
           </thead>
           <tbody>
-            {records.map((record) => (
+            {entries.map((entry) => (
               <tr
-                key={record.id}
+                key={entry.id}
                 className={cn(
-                  rowToneClass(record, colorRows),
-                  activeRecordId === record.id ? "ring-1 ring-inset ring-primary/25" : "",
+                  rowToneClass(entry, colorRows),
+                  activeEntryId === entry.id ? "ring-1 ring-inset ring-primary/25" : "",
                   "cursor-default transition-colors hover:bg-accent/35",
                 )}
                 onContextMenu={(event) => {
                   event.preventDefault();
-                  onOpenContextMenu(record.id, event.clientX, event.clientY);
+                  onOpenContextMenu(entry.id, event.clientX, event.clientY);
                 }}
                 onDoubleClick={(event) => {
                   if (event.target instanceof Element && event.target.closest("button,a,input")) {
                     return;
                   }
-                  onOpenRecord(record.id);
+                  onOpenEntry(entry.id);
                 }}
               >
                 {columns.map((column) => (
                   <td
-                    key={`${record.id}-${column.key}`}
+                    key={`${entry.id}-${column.key}`}
                     className={cn(
                       "border-b border-border/60 px-2.5 py-2.5 text-sm text-foreground/92 sm:px-4 sm:py-3",
                       column.align === "center" ? "text-center" : "text-left",
                     )}
                   >
-                    {renderCell(record, column, onToggleVerified, canModifyRecords)}
+                    {renderCell(entry, column, onToggleVerified, canModifyEntries)}
                   </td>
                 ))}
               </tr>
@@ -112,52 +112,52 @@ export function InventoryTable({
 }
 
 function renderCell(
-  record: InventoryRecord,
+  entry: InventoryEntry,
   column: ColumnConfig,
-  onToggleVerified: (recordId: string) => void,
-  canModifyRecords: boolean,
+  onToggleVerified: (entryId: string) => void,
+  canModifyEntries: boolean,
 ) {
   switch (column.key) {
     case "verified":
       return (
         <button
-          aria-label={`Toggle verified for ${record.description}`}
+          aria-label={`Toggle verified for ${entry.description}`}
           className="inline-flex items-center justify-center"
-          disabled={!canModifyRecords}
+          disabled={!canModifyEntries}
           type="button"
-          onClick={() => onToggleVerified(record.id)}
+          onClick={() => onToggleVerified(entry.id)}
         >
-          <Badge size="sm" variant={record.verifiedInSurvey ? "success" : "outline"}>
-            {record.verifiedInSurvey ? <CheckIcon className="size-3" /> : null}
-            {record.verifiedInSurvey ? "Verified" : "Pending"}
+          <Badge size="sm" variant={entry.verifiedInSurvey ? "success" : "outline"}>
+            {entry.verifiedInSurvey ? <CheckIcon className="size-3" /> : null}
+            {entry.verifiedInSurvey ? "Verified" : "Pending"}
           </Badge>
         </button>
       );
     case "assetNumber":
-      return renderText(record.assetNumber);
+      return renderText(entry.assetNumber);
     case "qty":
-      return renderText(record.qty == null ? "" : String(record.qty));
+      return renderText(entry.qty == null ? "" : String(entry.qty));
     case "manufacturer":
-      return renderText(record.manufacturer);
+      return renderText(entry.manufacturer);
     case "model":
-      return renderText(record.model);
+      return renderText(entry.model);
     case "description":
-      return renderText(record.description);
+      return renderText(entry.description);
     case "projectName":
-      return renderText(record.projectName);
+      return renderText(entry.projectName);
     case "location":
-      return renderText(record.location);
+      return renderText(entry.location);
     case "links": {
-      const label = formatLinkLabel(record.links);
+      const label = formatLinkLabel(entry.links);
       if (!label) {
         return renderText("");
       }
       return (
         <a
           className="inline-block max-w-full truncate font-mono text-xs text-foreground underline decoration-border underline-offset-4 transition-colors hover:text-primary"
-          href={record.links}
+          href={entry.links}
           rel="noreferrer"
-          title={record.links}
+          title={entry.links}
           target="_blank"
         >
           {label}
@@ -178,12 +178,12 @@ function renderText(value: string) {
   );
 }
 
-function rowToneClass(record: InventoryRecord, colorRows: boolean): string {
+function rowToneClass(entry: InventoryEntry, colorRows: boolean): string {
   if (!colorRows) {
     return "bg-transparent";
   }
 
-  switch (record.lifecycleStatus) {
+  switch (entry.lifecycleStatus) {
     case "active":
       return "bg-success/10";
     case "repair":

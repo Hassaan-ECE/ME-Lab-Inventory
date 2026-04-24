@@ -4,22 +4,22 @@ import { MOCK_INVENTORY } from "@/data/mockInventory";
 import {
   DEFAULT_FILTERS,
   buildResultsLabel,
-  filterRecords,
+  filterEntries,
   formatLinkLabel,
   getInventoryCounts,
-  sortRecords,
+  sortEntries,
 } from "@/lib/inventory";
 
 describe("inventory helpers", () => {
-  it("filters inventory records by query and scope", () => {
-    const results = filterRecords(MOCK_INVENTORY, "inventory", "reorder threshold", DEFAULT_FILTERS);
+  it("filters inventory entries by query and scope", () => {
+    const results = filterEntries(MOCK_INVENTORY, "inventory", "reorder threshold", DEFAULT_FILTERS);
 
     expect(results).toHaveLength(1);
     expect(results[0]?.id).toBe("me-1006");
   });
 
   it("combines field filters with global search", () => {
-    const results = filterRecords(MOCK_INVENTORY, "inventory", "fixture", {
+    const results = filterEntries(MOCK_INVENTORY, "inventory", "fixture", {
       ...DEFAULT_FILTERS,
       location: "tool crib",
     });
@@ -29,13 +29,13 @@ describe("inventory helpers", () => {
   });
 
   it("builds archive empty-state labels that match the source behavior", () => {
-    expect(buildResultsLabel(0, "archive", "", DEFAULT_FILTERS)).toBe("No archived records yet");
+    expect(buildResultsLabel(0, "archive", "", DEFAULT_FILTERS)).toBe("No archived entries yet");
     expect(buildResultsLabel(0, "archive", "bridgeport", DEFAULT_FILTERS)).toBe('No archived results for "bridgeport"');
   });
 
   it("keeps blank numeric values at the bottom when sorting", () => {
-    const results = filterRecords(MOCK_INVENTORY, "inventory", "", DEFAULT_FILTERS);
-    const sorted = sortRecords(results, { column: "qty", direction: "asc" });
+    const results = filterEntries(MOCK_INVENTORY, "inventory", "", DEFAULT_FILTERS);
+    const sorted = sortEntries(results, { column: "qty", direction: "asc" });
 
     expect(sorted.at(-1)?.id).toBe("me-1007");
   });
@@ -48,7 +48,7 @@ describe("inventory helpers", () => {
     ).toBe("www.cejn.com/en-us/products/thermal-control");
   });
 
-  it("counts verified and archived records from the seeded dataset", () => {
+  it("counts verified and archived entries from the seeded dataset", () => {
     expect(getInventoryCounts(MOCK_INVENTORY)).toEqual({
       archive: 4,
       inventory: 10,

@@ -5,7 +5,7 @@ import ExcelJS from "exceljs";
 
 import { resolveDbPath } from "./inventory-runtime.mjs";
 
-export const DEFAULT_EXCEL_EXPORT_FILENAME = "ME_Lab_Inventory_Export.xlsx";
+export const DEFAULT_EXCEL_EXPORT_FILENAME = "ME_Inventory_Export.xlsx";
 
 const WHITE = "FFFFFF";
 const OFF_WHITE = "F9FAFB";
@@ -76,7 +76,7 @@ const ISSUE_COLUMNS = [
 
 const SELECT_EXPORT_SQL = `
   SELECT
-    record_id,
+    entry_id,
     asset_number,
     serial_number,
     manufacturer,
@@ -103,8 +103,8 @@ const SELECT_EXPORT_SQL = `
     notes,
     is_archived,
     updated_at
-  FROM equipment
-  ORDER BY is_archived ASC, updated_at DESC, record_id DESC
+  FROM entries
+  ORDER BY is_archived ASC, updated_at DESC, entry_id DESC
 `;
 
 const SELECT_IMPORT_ISSUES_SQL = `
@@ -131,7 +131,7 @@ export async function exportExcelInventory({
     defaultPath: path.join(defaultDirectoryPath, DEFAULT_EXCEL_EXPORT_FILENAME),
     filters: [{ name: "Excel Workbook", extensions: ["xlsx"] }],
     properties: ["createDirectory", "showOverwriteConfirmation"],
-    title: "Export All Equipment to Excel",
+    title: "Export All Entries to Excel",
   });
 
   if (saveResult.canceled || !saveResult.filePath) {
@@ -143,7 +143,7 @@ export async function exportExcelInventory({
 
     if (showMessageBox) {
       await showMessageBox({
-        message: `All equipment data exported to:\n${saveResult.filePath}`,
+        message: `All entry data exported to:\n${saveResult.filePath}`,
         title: "Export Complete",
         type: "info",
       });
@@ -292,19 +292,19 @@ function buildSummarySheet(worksheet, stats, issueRows) {
 
   const titleRow = worksheet.getRow(1);
   worksheet.mergeCells("A1:B1");
-  titleRow.getCell(1).value = "ME Lab Inventory - Export Summary";
+  titleRow.getCell(1).value = "ME Inventory - Export Summary";
   titleRow.getCell(1).font = { bold: true, size: 16, color: { argb: "1F2937" } };
 
   worksheet.getCell("A2").value = `Generated ${new Date().toISOString().replace("T", " ").slice(0, 19)}`;
   worksheet.getCell("A2").font = { size: 11, color: { argb: "6B7280" } };
 
   let row = 4;
-  row = writeSummarySection(worksheet, row, "Export Details", [["Record Scope", "All records (Inventory + Archive)"]]);
+  row = writeSummarySection(worksheet, row, "Export Details", [["Entry Scope", "All entries (Inventory + Archive)"]]);
   row += 1;
   row = writeSummarySection(worksheet, row, "Inventory Statistics", [
-    ["Total Equipment Records", stats.total],
-    ["Inventory View Records", stats.inventory],
-    ["Archived Records", stats.archived],
+    ["Total Entries", stats.total],
+    ["Inventory View Entries", stats.inventory],
+    ["Archived Entries", stats.archived],
     ["Active", stats.active],
     ["In Repair", stats.repair],
     ["Scrapped", stats.scrapped],

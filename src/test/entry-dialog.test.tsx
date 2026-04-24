@@ -2,10 +2,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
-import { RecordDialog } from "@/components/inventory/RecordDialog";
-import type { InventoryRecord, InventoryRecordInput } from "@/types/inventory";
+import { EntryDialog } from "@/components/inventory/EntryDialog";
+import type { InventoryEntry, InventoryEntryInput } from "@/types/inventory";
 
-const BASE_RECORD: InventoryRecord = {
+const BASE_ENTRY: InventoryEntry = {
   archived: false,
   assetNumber: "ME-401",
   description: "Precision fixture plate",
@@ -19,28 +19,29 @@ const BASE_RECORD: InventoryRecord = {
   picturePath: "C:\\Pictures\\fixture-plate.jpg",
   projectName: "Fixture Lab",
   qty: 1,
-  recordUuid: "uuid-401",
+  entryUuid: "uuid-401",
   serialNumber: "SER-401",
   updatedAt: "2026-04-23 09:00:00",
   verifiedInSurvey: true,
   workingStatus: "working",
 };
 
-describe("RecordDialog", () => {
+describe("EntryDialog", () => {
   beforeEach(() => {
+    document.documentElement.classList.remove("dark");
     delete window.inventoryDesktop;
     vi.restoreAllMocks();
     mockMatchMedia(false);
   });
 
-  it("prepopulates the picture path and saves it with the record input", async () => {
+  it("prepopulates the picture path and saves it with the entry input", async () => {
     const user = userEvent.setup();
-    const onSave = vi.fn().mockResolvedValue(undefined) as unknown as (_: InventoryRecordInput) => Promise<void>;
+    const onSave = vi.fn().mockResolvedValue(undefined) as unknown as (_: InventoryEntryInput) => Promise<void>;
 
     render(
-      <RecordDialog
+      <EntryDialog
         mode="edit"
-        record={BASE_RECORD}
+        entry={BASE_ENTRY}
         onClose={vi.fn()}
         onSave={onSave}
       />,
@@ -51,7 +52,7 @@ describe("RecordDialog", () => {
 
     await user.clear(picturePathInput);
     await user.type(picturePathInput, "C:\\Pictures\\fixture-plate-updated.jpg");
-    await user.click(screen.getByRole("button", { name: "Save Record" }));
+    await user.click(screen.getByRole("button", { name: "Save Entry" }));
 
     expect(onSave).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -68,7 +69,7 @@ describe("RecordDialog", () => {
     });
 
     render(
-      <RecordDialog
+      <EntryDialog
         mode="add"
         onClose={vi.fn()}
         onSave={vi.fn()}
@@ -89,15 +90,15 @@ describe("RecordDialog", () => {
     mockMatchMedia(true);
 
     render(
-      <RecordDialog
+      <EntryDialog
         mode="edit"
-        record={BASE_RECORD}
+        entry={BASE_ENTRY}
         onClose={vi.fn()}
         onSave={vi.fn()}
       />,
     );
 
-    fireEvent.load(screen.getByAltText("Record picture preview"));
+    fireEvent.load(screen.getByAltText("Entry picture preview"));
     fireEvent.doubleClick(screen.getByRole("button", { name: "Picture preview" }));
 
     expect(openPath).toHaveBeenCalledWith("C:\\Pictures\\fixture-plate.jpg");
@@ -105,15 +106,15 @@ describe("RecordDialog", () => {
 
   it("shows a missing-picture fallback when the preview fails to load", () => {
     render(
-      <RecordDialog
+      <EntryDialog
         mode="edit"
-        record={BASE_RECORD}
+        entry={BASE_ENTRY}
         onClose={vi.fn()}
         onSave={vi.fn()}
       />,
     );
 
-    fireEvent.error(screen.getByAltText("Record picture preview"));
+    fireEvent.error(screen.getByAltText("Entry picture preview"));
 
     expect(screen.getAllByText("Picture not found").length).toBeGreaterThan(0);
   });
@@ -122,9 +123,9 @@ describe("RecordDialog", () => {
     mockMatchMedia(true);
 
     render(
-      <RecordDialog
+      <EntryDialog
         mode="edit"
-        record={BASE_RECORD}
+        entry={BASE_ENTRY}
         onClose={vi.fn()}
         onSave={vi.fn()}
       />,
@@ -132,6 +133,27 @@ describe("RecordDialog", () => {
 
     const dialogPanel = screen.getByRole("dialog").firstElementChild;
     expect(dialogPanel).toHaveClass("max-h-[92vh]", "lg:max-h-[94vh]");
+  });
+
+  it("uses dark-safe native select and option colors", () => {
+    document.documentElement.classList.add("dark");
+
+    render(
+      <EntryDialog
+        mode="edit"
+        entry={BASE_ENTRY}
+        onClose={vi.fn()}
+        onSave={vi.fn()}
+      />,
+    );
+
+    const lifecycleSelect = screen.getByLabelText("Lifecycle");
+    const workingStatusSelect = screen.getByLabelText("Working Status");
+
+    expect(lifecycleSelect).toHaveClass("dark:bg-neutral-950", "dark:text-neutral-100");
+    expect(workingStatusSelect).toHaveClass("dark:bg-neutral-950", "dark:text-neutral-100");
+    expect(screen.getByRole("option", { name: "Active" })).toHaveClass("dark:bg-neutral-950", "dark:text-neutral-100");
+    expect(screen.getByRole("option", { name: "Working" })).toHaveClass("dark:bg-neutral-950", "dark:text-neutral-100");
   });
 });
 
@@ -157,10 +179,10 @@ function createDesktopBridge(
 ): NonNullable<Window["inventoryDesktop"]> {
   return {
     isDesktop: true,
-    loadInventory: vi.fn().mockResolvedValue({ dbPath: "", records: [] }),
+    loadInventory: vi.fn().mockResolvedValue({ dbPath: "", entries: [] }),
     syncInventory: vi.fn().mockResolvedValue({
       dbPath: "",
-      records: [],
+      entries: [],
       shared: {
         available: true,
         canModify: true,
@@ -168,11 +190,11 @@ function createDesktopBridge(
         message: "",
       },
     }),
-    toggleVerified: vi.fn().mockResolvedValue(BASE_RECORD),
-    createRecord: vi.fn().mockResolvedValue(BASE_RECORD),
-    updateRecord: vi.fn().mockResolvedValue(BASE_RECORD),
-    setArchived: vi.fn().mockResolvedValue(BASE_RECORD),
-    deleteRecord: vi.fn().mockResolvedValue({ recordId: BASE_RECORD.id }),
+    toggleVerifiedEntry: vi.fn().mockResolvedValue(BASE_ENTRY),
+    createEntry: vi.fn().mockResolvedValue(BASE_ENTRY),
+    updateEntry: vi.fn().mockResolvedValue(BASE_ENTRY),
+    setArchivedEntry: vi.fn().mockResolvedValue(BASE_ENTRY),
+    deleteEntry: vi.fn().mockResolvedValue({ entryId: BASE_ENTRY.id }),
     openExternal: vi.fn().mockResolvedValue(true),
     openPath: vi.fn().mockResolvedValue(true),
     pickPicturePath: vi.fn().mockResolvedValue(null),

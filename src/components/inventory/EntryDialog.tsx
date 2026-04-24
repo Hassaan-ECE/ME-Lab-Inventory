@@ -10,26 +10,29 @@ import { cn } from "@/lib/utils";
 import {
   LIFECYCLE_OPTIONS,
   WORKING_STATUS_OPTIONS,
-  type InventoryRecord,
-  type InventoryRecordInput,
+  type InventoryEntry,
+  type InventoryEntryInput,
   type LifecycleStatus,
   type WorkingStatus,
 } from "@/types/inventory";
 
 const LARGE_VIEWPORT_QUERY = "(min-width: 1024px)";
+const SELECT_CLASS =
+  "h-9 w-full rounded-lg border border-input bg-background px-3 text-sm text-foreground outline-none transition-shadow focus:border-ring focus:ring-[3px] focus:ring-ring/18 dark:bg-neutral-950 dark:text-neutral-100";
+const OPTION_CLASS = "bg-background text-foreground dark:bg-neutral-950 dark:text-neutral-100";
 
 type PicturePreviewState = "empty" | "loading" | "loaded" | "missing";
 
-interface RecordDialogProps {
+interface EntryDialogProps {
   defaultArchived?: boolean;
   mode: "add" | "edit";
   onClose: () => void;
-  onSave: (input: InventoryRecordInput) => Promise<void> | void;
+  onSave: (input: InventoryEntryInput) => Promise<void> | void;
   readOnly?: boolean;
-  record?: InventoryRecord | null;
+  entry?: InventoryEntry | null;
 }
 
-interface RecordFormState {
+interface EntryFormState {
   archived: boolean;
   assetNumber: string;
   assignedTo: string;
@@ -49,13 +52,13 @@ interface RecordFormState {
   workingStatus: WorkingStatus;
 }
 
-export function RecordDialog({ defaultArchived = false, mode, onClose, onSave, readOnly = false, record }: RecordDialogProps) {
-  const [form, setForm] = useState<RecordFormState>(() => buildFormState(record, defaultArchived));
+export function EntryDialog({ defaultArchived = false, mode, onClose, onSave, readOnly = false, entry }: EntryDialogProps) {
+  const [form, setForm] = useState<EntryFormState>(() => buildFormState(entry, defaultArchived));
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const isLargeViewport = useMediaQuery(LARGE_VIEWPORT_QUERY);
   const formId = useId();
-  const showsSidebarActions = mode === "edit" && Boolean(record) && isLargeViewport;
+  const showsSidebarActions = mode === "edit" && Boolean(entry) && isLargeViewport;
   const picturePath = form.picturePath.trim();
   const picturePreviewSrc = buildPicturePreviewSource(picturePath);
   const [loadedPreviewSrc, setLoadedPreviewSrc] = useState<string | null>(null);
@@ -123,7 +126,7 @@ export function RecordDialog({ defaultArchived = false, mode, onClose, onSave, r
       return;
     }
 
-    const result = buildRecordInput(form);
+    const result = buildEntryInput(form);
     if ("error" in result) {
       setError(result.error);
       return;
@@ -135,7 +138,7 @@ export function RecordDialog({ defaultArchived = false, mode, onClose, onSave, r
       await onSave(result.value);
     } catch (submissionError) {
       setIsSaving(false);
-      setError(submissionError instanceof Error ? submissionError.message : "Could not save this record.");
+      setError(submissionError instanceof Error ? submissionError.message : "Could not save this entry.");
     }
   }
 
@@ -160,10 +163,10 @@ export function RecordDialog({ defaultArchived = false, mode, onClose, onSave, r
             <div className="flex items-center justify-between gap-3">
               <div>
                 <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-                  {mode === "edit" ? "Open Full Record" : "Add Record"}
+                  {mode === "edit" ? "Open Full Entry" : "Add Entry"}
                 </p>
                 <h2 className="text-xl font-semibold tracking-tight text-foreground">
-                  {mode === "edit" ? "Edit Record" : "Add Record"}
+                  {mode === "edit" ? "Edit Entry" : "Add Entry"}
                 </h2>
               </div>
               <div className="flex items-center gap-2">
@@ -222,7 +225,7 @@ export function RecordDialog({ defaultArchived = false, mode, onClose, onSave, r
 
                 <Field label="Project">
                   <Input
-                    placeholder="Project this record supports"
+                    placeholder="Project this entry supports"
                     value={form.projectName}
                     onChange={(event) => updateForm(setForm, "projectName", event.currentTarget.value)}
                   />
@@ -230,7 +233,7 @@ export function RecordDialog({ defaultArchived = false, mode, onClose, onSave, r
 
                 <Field className="lg:col-span-2" label="Description">
                   <Input
-                    placeholder="Part or record description"
+                    placeholder="Part or entry description"
                     value={form.description}
                     onChange={(event) => updateForm(setForm, "description", event.currentTarget.value)}
                   />
@@ -272,7 +275,7 @@ export function RecordDialog({ defaultArchived = false, mode, onClose, onSave, r
                       <Button
                         disabled={!canBrowsePicture}
                         size="sm"
-                        title={canBrowsePicture ? "Browse for a record picture" : "Desktop file picker unavailable"}
+                        title={canBrowsePicture ? "Browse for an entry picture" : "Desktop file picker unavailable"}
                         variant="outline"
                         onClick={() => {
                           void handleBrowsePicture();
@@ -287,14 +290,14 @@ export function RecordDialog({ defaultArchived = false, mode, onClose, onSave, r
 
                 <Field label="Lifecycle">
                   <select
-                    className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm text-foreground outline-none transition-shadow focus:border-ring focus:ring-[3px] focus:ring-ring/18 dark:bg-input/30"
+                    className={SELECT_CLASS}
                     value={form.lifecycleStatus}
                     onChange={(event) =>
                       updateForm(setForm, "lifecycleStatus", event.currentTarget.value as LifecycleStatus)
                     }
                   >
                     {LIFECYCLE_OPTIONS.map((option) => (
-                      <option key={option} value={option}>
+                      <option className={OPTION_CLASS} key={option} value={option}>
                         {formatOptionLabel(option)}
                       </option>
                     ))}
@@ -303,14 +306,14 @@ export function RecordDialog({ defaultArchived = false, mode, onClose, onSave, r
 
                 <Field label="Working Status">
                   <select
-                    className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm text-foreground outline-none transition-shadow focus:border-ring focus:ring-[3px] focus:ring-ring/18 dark:bg-input/30"
+                    className={SELECT_CLASS}
                     value={form.workingStatus}
                     onChange={(event) =>
                       updateForm(setForm, "workingStatus", event.currentTarget.value as WorkingStatus)
                     }
                   >
                     {WORKING_STATUS_OPTIONS.map((option) => (
-                      <option key={option} value={option}>
+                      <option className={OPTION_CLASS} key={option} value={option}>
                         {formatOptionLabel(option)}
                       </option>
                     ))}
@@ -382,7 +385,7 @@ export function RecordDialog({ defaultArchived = false, mode, onClose, onSave, r
                     type="checkbox"
                     onChange={(event) => updateForm(setForm, "archived", event.currentTarget.checked)}
                   />
-                  Archived record
+                  Archived entry
                 </label>
               </div>
             </div>
@@ -395,7 +398,7 @@ export function RecordDialog({ defaultArchived = false, mode, onClose, onSave, r
           )}
         </form>
 
-        {showsSidebarActions && record ? (
+        {showsSidebarActions && entry ? (
           <aside className="flex w-[19rem] shrink-0 flex-col bg-background/60 px-5 py-4">
             <div className="min-h-0 flex-1 overflow-y-auto pr-1">
               {showSidebarPicturePreview ? (
@@ -429,17 +432,17 @@ export function RecordDialog({ defaultArchived = false, mode, onClose, onSave, r
 
               <div className={cn(showSidebarPicturePreview ? "mt-4" : "")}>
                 <div>
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Record Context</p>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Entry Context</p>
                   <h3 className="mt-1 text-base font-semibold text-foreground">Database Metadata</h3>
                 </div>
 
                 <div className="mt-4 space-y-4">
-                  <ContextRow label="Record ID" value={record.id} />
-                  <ContextRow label="Created" value={record.createdAt || "-"} />
-                  <ContextRow label="Updated" value={record.updatedAt || "-"} />
-                  <ContextRow label="Status" value={record.archived ? "Archived" : "Inventory"} />
-                  <ContextRow label="Verified" value={record.verifiedInSurvey ? "Verified" : "Pending"} />
-                  <ContextRow label="Manual Entry" value={record.manualEntry ? "Yes" : "No"} />
+                  <ContextRow label="Entry ID" value={entry.id} />
+                  <ContextRow label="Created" value={entry.createdAt || "-"} />
+                  <ContextRow label="Updated" value={entry.updatedAt || "-"} />
+                  <ContextRow label="Status" value={entry.archived ? "Archived" : "Inventory"} />
+                  <ContextRow label="Verified" value={entry.verifiedInSurvey ? "Verified" : "Pending"} />
+                  <ContextRow label="Manual Entry" value={entry.manualEntry ? "Yes" : "No"} />
                 </div>
               </div>
             </div>
@@ -532,7 +535,7 @@ function PicturePreviewCard({
         {previewSrc && previewState !== "missing" ? (
           <>
             <img
-              alt="Record picture preview"
+              alt="Entry picture preview"
               className={cn(
                 "h-full w-full object-contain bg-background/40 transition-opacity",
                 previewState === "loaded" ? "opacity-100" : "opacity-0",
@@ -629,7 +632,7 @@ function DialogActions({ error, formId, isSaving, layout, readOnly, onClose }: D
             Cancel
           </Button>
           <Button className="w-full" disabled={readOnly || isSaving} form={formId} type="submit">
-            {isSaving ? "Saving..." : "Save Record"}
+            {isSaving ? "Saving..." : "Save Entry"}
           </Button>
         </div>
       </>
@@ -643,37 +646,37 @@ function DialogActions({ error, formId, isSaving, layout, readOnly, onClose }: D
         Cancel
       </Button>
       <Button disabled={readOnly || isSaving} form={formId} type="submit">
-        {isSaving ? "Saving..." : "Save Record"}
+        {isSaving ? "Saving..." : "Save Entry"}
       </Button>
     </div>
   );
 }
 
-function buildFormState(record: InventoryRecord | null | undefined, defaultArchived: boolean): RecordFormState {
+function buildFormState(entry: InventoryEntry | null | undefined, defaultArchived: boolean): EntryFormState {
   return {
-    archived: record?.archived ?? defaultArchived,
-    assetNumber: record?.assetNumber ?? "",
-    assignedTo: record?.assignedTo ?? "",
-    condition: record?.condition ?? "",
-    description: record?.description ?? "",
-    lifecycleStatus: record?.lifecycleStatus ?? "active",
-    links: record?.links ?? "",
-    location: record?.location ?? "",
-    manufacturer: record?.manufacturer ?? "",
-    model: record?.model ?? "",
-    notes: record?.notes ?? "",
-    picturePath: record?.picturePath ?? "",
-    projectName: record?.projectName ?? "",
-    qty: record?.qty == null ? "" : String(record.qty),
-    serialNumber: record?.serialNumber ?? "",
-    verifiedInSurvey: record?.verifiedInSurvey ?? false,
-    workingStatus: record?.workingStatus ?? "unknown",
+    archived: entry?.archived ?? defaultArchived,
+    assetNumber: entry?.assetNumber ?? "",
+    assignedTo: entry?.assignedTo ?? "",
+    condition: entry?.condition ?? "",
+    description: entry?.description ?? "",
+    lifecycleStatus: entry?.lifecycleStatus ?? "active",
+    links: entry?.links ?? "",
+    location: entry?.location ?? "",
+    manufacturer: entry?.manufacturer ?? "",
+    model: entry?.model ?? "",
+    notes: entry?.notes ?? "",
+    picturePath: entry?.picturePath ?? "",
+    projectName: entry?.projectName ?? "",
+    qty: entry?.qty == null ? "" : String(entry.qty),
+    serialNumber: entry?.serialNumber ?? "",
+    verifiedInSurvey: entry?.verifiedInSurvey ?? false,
+    workingStatus: entry?.workingStatus ?? "unknown",
   };
 }
 
-function buildRecordInput(
-  form: RecordFormState,
-): { value: InventoryRecordInput } | { error: string } {
+function buildEntryInput(
+  form: EntryFormState,
+): { value: InventoryEntryInput } | { error: string } {
   const qtyText = form.qty.trim();
   let qty: number | null = null;
 
@@ -713,7 +716,7 @@ function buildRecordInput(
   };
 }
 
-function hasIdentity(form: RecordFormState): boolean {
+function hasIdentity(form: EntryFormState): boolean {
   return Boolean(
     form.assetNumber.trim() ||
       form.serialNumber.trim() ||
@@ -723,10 +726,10 @@ function hasIdentity(form: RecordFormState): boolean {
   );
 }
 
-function updateForm<Key extends keyof RecordFormState>(
-  setForm: Dispatch<SetStateAction<RecordFormState>>,
+function updateForm<Key extends keyof EntryFormState>(
+  setForm: Dispatch<SetStateAction<EntryFormState>>,
   key: Key,
-  value: RecordFormState[Key],
+  value: EntryFormState[Key],
 ): void {
   setForm((current) => ({ ...current, [key]: value }));
 }

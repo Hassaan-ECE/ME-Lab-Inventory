@@ -2,23 +2,23 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
-import { InventoryPrototype } from "@/components/inventory/InventoryPrototype";
+import { InventoryShell } from "@/components/inventory/InventoryShell";
 
-describe("InventoryPrototype table controls", () => {
+describe("InventoryShell table controls", () => {
   beforeEach(() => {
     localStorage.clear();
     document.documentElement.classList.remove("dark");
   });
 
   it("renders compact labels for long links", () => {
-    render(<InventoryPrototype />);
+    render(<InventoryShell />);
 
     expect(screen.getByText("www.cejn.com/en-us/products/thermal-control")).toBeInTheDocument();
   });
 
   it("hides a selected column from the table", async () => {
     const user = userEvent.setup();
-    render(<InventoryPrototype />);
+    render(<InventoryShell />);
 
     await user.click(screen.getByRole("button", { name: /Columns/i }));
     await user.click(screen.getByRole("checkbox", { name: "Links" }));
@@ -26,9 +26,28 @@ describe("InventoryPrototype table controls", () => {
     expect(screen.queryByRole("columnheader", { name: /Links/i })).not.toBeInTheDocument();
   });
 
+  it("shows a selected style on the color rows toggle and still toggles row colors", async () => {
+    const user = userEvent.setup();
+    render(<InventoryShell />);
+
+    const colorRowsToggle = screen.getByRole("button", { name: "Color rows" });
+    const firstRow = screen.getByText("Stainless socket-head cap screws, 1/4-20").closest("tr");
+
+    expect(colorRowsToggle).toHaveAttribute("aria-pressed", "true");
+    expect(colorRowsToggle.className).toContain("bg-primary");
+    expect(colorRowsToggle.className).toContain("text-primary-foreground");
+    expect(colorRowsToggle.className).toContain("shadow-sm");
+    expect(firstRow?.className).toContain("bg-success/10");
+
+    await user.click(colorRowsToggle);
+
+    expect(colorRowsToggle).toHaveAttribute("aria-pressed", "false");
+    expect(firstRow?.className).toContain("bg-transparent");
+  });
+
   it("disables the last visible data column in the menu", async () => {
     const user = userEvent.setup();
-    render(<InventoryPrototype />);
+    render(<InventoryShell />);
 
     await user.click(screen.getByRole("button", { name: /Columns/i }));
     await user.click(screen.getByRole("checkbox", { name: "Links" }));

@@ -1,5 +1,5 @@
 declare module "../../electron/inventory-db.mjs" {
-  import type { InventoryRecord, InventoryRecordInput, InventorySharedStatus } from "@/types/inventory";
+  import type { InventoryEntry, InventoryEntryInput, InventorySharedStatus } from "@/types/inventory";
 
   interface RuntimeContext {
     appPath: string;
@@ -8,43 +8,43 @@ declare module "../../electron/inventory-db.mjs" {
     userDataPath: string;
   }
 
-  export function loadInventoryRecords(runtimeContext: RuntimeContext): {
+  export function loadInventoryEntries(runtimeContext: RuntimeContext): {
     dbPath: string;
-    records: InventoryRecord[];
+    entries: InventoryEntry[];
     shared: InventorySharedStatus;
   };
 
   export function syncInventoryWithShared(runtimeContext: RuntimeContext): {
     dbPath: string;
-    records: InventoryRecord[];
+    entries: InventoryEntry[];
     shared: InventorySharedStatus;
   };
 
-  export function createInventoryRecord(
+  export function createInventoryEntry(
     runtimeContext: RuntimeContext,
-    recordInput: InventoryRecordInput,
-  ): InventoryRecord;
+    entryInput: InventoryEntryInput,
+  ): InventoryEntry;
 
-  export function updateInventoryRecord(
+  export function updateInventoryEntry(
     runtimeContext: RuntimeContext,
-    recordId: string,
-    recordInput: InventoryRecordInput,
-  ): InventoryRecord;
+    entryId: string,
+    entryInput: InventoryEntryInput,
+  ): InventoryEntry;
 
-  export function toggleVerifiedRecord(
+  export function toggleVerifiedEntry(
     runtimeContext: RuntimeContext,
-    recordId: string,
+    entryId: string,
     nextVerified: boolean,
-  ): InventoryRecord;
+  ): InventoryEntry;
 
-  export function setArchivedRecord(
+  export function setArchivedEntry(
     runtimeContext: RuntimeContext,
-    recordId: string,
+    entryId: string,
     archived: boolean,
-  ): InventoryRecord;
+  ): InventoryEntry;
 
-  export function deleteInventoryRecord(
+  export function deleteInventoryEntry(
     runtimeContext: RuntimeContext,
-    recordId: string,
-  ): { recordId: string };
+    entryId: string,
+  ): { entryId: string };
 }

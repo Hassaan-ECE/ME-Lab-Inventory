@@ -2,18 +2,28 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
-import { InventoryPrototype } from "@/components/inventory/InventoryPrototype";
-import type { InventoryRecord, InventorySharedStatus } from "@/types/inventory";
+import { InventoryShell } from "@/components/inventory/InventoryShell";
+import type { InventoryEntry, InventorySharedStatus } from "@/types/inventory";
 
 const CONNECTED_SHARED_STATUS: InventorySharedStatus = {
   available: true,
   canModify: true,
   enabled: true,
   message: "",
+  mutationMode: "shared",
+  syncIntervalMs: 10_000,
+};
+const LOCAL_SHARED_STATUS: InventorySharedStatus = {
+  available: false,
+  canModify: true,
+  enabled: true,
+  hasLocalOnlyChanges: true,
+  message: "Shared workspace unavailable. Saving changes locally.",
+  mutationMode: "local",
   syncIntervalMs: 10_000,
 };
 
-describe("InventoryPrototype shell", () => {
+describe("InventoryShell shell", () => {
   beforeEach(() => {
     localStorage.clear();
     document.documentElement.classList.remove("dark");
@@ -21,20 +31,27 @@ describe("InventoryPrototype shell", () => {
   });
 
   it("renders the inventory view by default with seeded counts", () => {
-    render(<InventoryPrototype />);
+    render(<InventoryShell />);
 
-    expect(screen.getAllByText("ME Lab Inventory")).toHaveLength(1);
+    expect(screen.getAllByText("ME Inventory")).toHaveLength(1);
+    expect(screen.getByText("v0.9.0")).toBeInTheDocument();
+    expect(screen.queryByText(/prototype/i)).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Import Data" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Export/i })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Export Excel" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Export HTML" })).not.toBeInTheDocument();
-    expect(screen.getByText("Showing all 10 equipment records")).toBeInTheDocument();
+    expect(
+      screen.getByPlaceholderText(
+        "Search entries by asset, serial, maker, model, description, location, status, or notes",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Showing all 10 entries")).toBeInTheDocument();
     expect(screen.getByText("Total: 14 | Verified: 8/14")).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: /Manufacturer/i })).toBeInTheDocument();
   });
 
-  it("loads records from the desktop bridge when available", async () => {
-    const desktopRecords: InventoryRecord[] = [
+  it("loads entries from the desktop bridge when available", async () => {
+    const desktopEntries: InventoryEntry[] = [
       {
         id: "101",
         assetNumber: "ME-101",
@@ -74,86 +91,89 @@ describe("InventoryPrototype shell", () => {
     window.inventoryDesktop = {
       isDesktop: true,
       loadInventory: vi.fn().mockResolvedValue({
-        dbPath: "D:/coding/IMS_t3code_ref_design/data/me_lab_inventory.db",
-        records: desktopRecords,
+        dbPath: "D:/coding/ME Inventory/data/me_inventory.db",
+        entries: desktopEntries,
         shared: CONNECTED_SHARED_STATUS,
       }),
       syncInventory: vi.fn().mockResolvedValue({
-        dbPath: "D:/coding/IMS_t3code_ref_design/data/me_lab_inventory.db",
-        records: desktopRecords,
+        dbPath: "D:/coding/ME Inventory/data/me_inventory.db",
+        entries: desktopEntries,
         shared: CONNECTED_SHARED_STATUS,
       }),
-      toggleVerified: vi.fn().mockResolvedValue(desktopRecords[0]),
-      createRecord: vi.fn().mockResolvedValue(desktopRecords[0]),
-      updateRecord: vi.fn().mockResolvedValue(desktopRecords[0]),
-      setArchived: vi.fn().mockResolvedValue(desktopRecords[0]),
-      deleteRecord: vi.fn().mockResolvedValue({ recordId: desktopRecords[0].id }),
+      toggleVerifiedEntry: vi.fn().mockResolvedValue(desktopEntries[0]),
+      createEntry: vi.fn().mockResolvedValue(desktopEntries[0]),
+      updateEntry: vi.fn().mockResolvedValue(desktopEntries[0]),
+      setArchivedEntry: vi.fn().mockResolvedValue(desktopEntries[0]),
+      deleteEntry: vi.fn().mockResolvedValue({ entryId: desktopEntries[0].id }),
       openExternal: vi.fn().mockResolvedValue(true),
       openPath: vi.fn().mockResolvedValue(true),
       pickPicturePath: vi.fn().mockResolvedValue(null),
-      exportExcel: vi.fn().mockResolvedValue({ canceled: false, outputPath: "D:/exports/ME_Lab_Inventory_Export.xlsx" }),
+      exportExcel: vi.fn().mockResolvedValue({ canceled: false, outputPath: "D:/exports/ME_Inventory_Export.xlsx" }),
     };
 
-    render(<InventoryPrototype />);
+    render(<InventoryShell />);
 
-    expect(screen.getByText("Loading inventory records...")).toBeInTheDocument();
-    expect(await screen.findByText("Showing all 2 equipment records")).toBeInTheDocument();
+    expect(screen.getByText("Loading inventory entries...")).toBeInTheDocument();
+    expect(await screen.findByText("Showing all 2 entries")).toBeInTheDocument();
     expect(screen.getByText("Bridgeport")).toBeInTheDocument();
     expect(screen.getByText("Total: 2 | Verified: 1/2")).toBeInTheDocument();
   });
 
   it("switches to archive view and updates the summary", async () => {
     const user = userEvent.setup();
-    render(<InventoryPrototype />);
+    render(<InventoryShell />);
 
     await user.click(screen.getAllByRole("button", { name: /Archive/i })[0]);
 
-    expect(screen.getByText("Showing all 4 archived records")).toBeInTheDocument();
+    expect(screen.getByText("Showing all 4 archived entries")).toBeInTheDocument();
+    expect(
+      screen.getByPlaceholderText("Search archived entries by asset, serial, maker, model, description, location, or notes"),
+    ).toBeInTheDocument();
     expect(screen.getByText("Cabinet table saw")).toBeInTheDocument();
   });
 
   it("shows and clears the filter panel", async () => {
     const user = userEvent.setup();
-    render(<InventoryPrototype />);
+    render(<InventoryShell />);
 
     await user.click(screen.getByRole("button", { name: "Filters" }));
     const manufacturerFilter = screen.getByLabelText("Filter manufacturer");
     await user.type(manufacturerFilter, "Mitutoyo");
 
-    expect(screen.getByText("Showing 1 filtered equipment records")).toBeInTheDocument();
+    expect(screen.getByText("Showing 1 filtered entries")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Clear Column Filters" }));
-    expect(screen.getByText("Showing all 10 equipment records")).toBeInTheDocument();
+    expect(screen.getByText("Showing all 10 entries")).toBeInTheDocument();
   });
 
   it("shows the inventory empty-state CTA for unmatched searches", async () => {
     const user = userEvent.setup();
-    render(<InventoryPrototype />);
+    render(<InventoryShell />);
 
     await user.type(screen.getByLabelText("Inventory search"), "no-match-value");
 
     expect(screen.getByText('No results for "no-match-value"')).toBeInTheDocument();
     expect(
-      screen.getByText("Try a broader search, clear the column filters, or add a new record."),
+      screen.getByText("Try a broader search, clear the column filters, or add a new entry."),
     ).toBeInTheDocument();
-    expect(screen.getAllByRole("button", { name: "Add Record" }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("button", { name: "Add Entry" }).length).toBeGreaterThan(0);
   });
 
   it("updates theme preference and shows mock verified feedback", async () => {
     const user = userEvent.setup();
-    render(<InventoryPrototype />);
+    render(<InventoryShell />);
 
     await user.click(screen.getAllByRole("button", { name: /Dark/i })[0]);
     expect(document.documentElement.classList.contains("dark")).toBe(true);
-    expect(localStorage.getItem("ims.t3.theme")).toBe("dark");
+    expect(localStorage.getItem("meInventory.theme")).toBe("dark");
 
     await user.click(screen.getByRole("button", { name: /Toggle verified for Stainless socket-head cap screws/i }));
-    expect(screen.getByText("Verified state updated locally in the prototype.")).toBeInTheDocument();
+    expect(screen.getByText("Verified state updated locally.")).toBeInTheDocument();
   });
 
   it("shows the HTML export placeholder message", async () => {
     const user = userEvent.setup();
-    render(<InventoryPrototype />);
+    render(<InventoryShell />);
 
     await user.click(screen.getByRole("button", { name: /Export/i }));
     await user.click(screen.getByRole("menuitem", { name: "HTML" }));
@@ -165,38 +185,120 @@ describe("InventoryPrototype shell", () => {
     const user = userEvent.setup();
     const exportExcel = vi.fn().mockResolvedValue({
       canceled: false,
-      outputPath: "D:/exports/ME_Lab_Inventory_Export.xlsx",
+      outputPath: "D:/exports/ME_Inventory_Export.xlsx",
     });
 
     window.inventoryDesktop = {
       isDesktop: true,
       loadInventory: vi.fn().mockResolvedValue({
-        dbPath: "D:/coding/IMS_t3code_ref_design/data/me_lab_inventory.db",
-        records: [],
+        dbPath: "D:/coding/ME Inventory/data/me_inventory.db",
+        entries: [],
         shared: CONNECTED_SHARED_STATUS,
       }),
       syncInventory: vi.fn().mockResolvedValue({
-        dbPath: "D:/coding/IMS_t3code_ref_design/data/me_lab_inventory.db",
-        records: [],
+        dbPath: "D:/coding/ME Inventory/data/me_inventory.db",
+        entries: [],
         shared: CONNECTED_SHARED_STATUS,
       }),
-      toggleVerified: vi.fn().mockResolvedValue(null),
-      createRecord: vi.fn().mockResolvedValue(null),
-      updateRecord: vi.fn().mockResolvedValue(null),
-      setArchived: vi.fn().mockResolvedValue(null),
-      deleteRecord: vi.fn().mockResolvedValue({ recordId: "0" }),
+      toggleVerifiedEntry: vi.fn().mockResolvedValue(null),
+      createEntry: vi.fn().mockResolvedValue(null),
+      updateEntry: vi.fn().mockResolvedValue(null),
+      setArchivedEntry: vi.fn().mockResolvedValue(null),
+      deleteEntry: vi.fn().mockResolvedValue({ entryId: "0" }),
       openExternal: vi.fn().mockResolvedValue(true),
       openPath: vi.fn().mockResolvedValue(true),
       pickPicturePath: vi.fn().mockResolvedValue(null),
       exportExcel,
     };
 
-    render(<InventoryPrototype />);
+    render(<InventoryShell />);
 
     await user.click(screen.getByRole("button", { name: /Export/i }));
     await user.click(screen.getByRole("menuitem", { name: "Excel" }));
 
     expect(exportExcel).toHaveBeenCalledTimes(1);
     expect(await screen.findByText("Excel export completed.")).toBeInTheDocument();
+  });
+
+  it("keeps desktop editing enabled when mutations are local-only", async () => {
+    const user = userEvent.setup();
+    let desktopEntries: InventoryEntry[] = [
+      {
+        id: "201",
+        assetNumber: "ME-201",
+        qty: 1,
+        manufacturer: "Offline Maker",
+        model: "OM-1",
+        description: "Offline editable entry",
+        projectName: "Local Work",
+        location: "Bench 1",
+        links: "",
+        notes: "",
+        lifecycleStatus: "active",
+        workingStatus: "working",
+        verifiedInSurvey: false,
+        archived: false,
+        updatedAt: "2026-04-23 10:00:00",
+      },
+    ];
+    const createdEntry: InventoryEntry = {
+      ...desktopEntries[0],
+      id: "202",
+      assetNumber: "",
+      description: "Local-only saved entry",
+      manufacturer: "Local Maker",
+      verifiedInSurvey: false,
+    };
+    const createEntry = vi.fn().mockImplementation(async () => {
+      desktopEntries = [createdEntry, ...desktopEntries];
+      return createdEntry;
+    });
+
+    window.inventoryDesktop = {
+      isDesktop: true,
+      loadInventory: vi.fn().mockImplementation(async () => ({
+        dbPath: "D:/coding/ME Inventory/data/me_inventory.db",
+        entries: desktopEntries,
+        shared: LOCAL_SHARED_STATUS,
+      })),
+      syncInventory: vi.fn().mockImplementation(async () => ({
+        dbPath: "D:/coding/ME Inventory/data/me_inventory.db",
+        entries: desktopEntries,
+        shared: LOCAL_SHARED_STATUS,
+      })),
+      toggleVerifiedEntry: vi.fn().mockImplementation(async (entryId: string, nextVerified: boolean) => {
+        const updatedEntry = { ...desktopEntries.find((entry) => entry.id === entryId)!, verifiedInSurvey: nextVerified };
+        desktopEntries = desktopEntries.map((entry) => (entry.id === entryId ? updatedEntry : entry));
+        return updatedEntry;
+      }),
+      createEntry,
+      updateEntry: vi.fn().mockResolvedValue(desktopEntries[0]),
+      setArchivedEntry: vi.fn().mockResolvedValue(desktopEntries[0]),
+      deleteEntry: vi.fn().mockResolvedValue({ entryId: desktopEntries[0].id }),
+      openExternal: vi.fn().mockResolvedValue(true),
+      openPath: vi.fn().mockResolvedValue(true),
+      pickPicturePath: vi.fn().mockResolvedValue(null),
+      exportExcel: vi.fn().mockResolvedValue({ canceled: false, outputPath: "D:/exports/ME_Inventory_Export.xlsx" }),
+    };
+
+    render(<InventoryShell />);
+
+    expect(await screen.findByText(/Shared workspace unavailable\. Saving changes locally\./)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add Entry" })).toBeEnabled();
+
+    await user.click(screen.getByRole("button", { name: "Add Entry" }));
+    const manufacturerInput = screen.getByLabelText("Manufacturer / Brand");
+    await user.type(manufacturerInput, "Local Maker");
+    await user.type(screen.getByLabelText("Description"), "Local-only saved entry");
+
+    expect(manufacturerInput).toHaveValue("Local Maker");
+
+    await user.click(screen.getByRole("button", { name: "Save Entry" }));
+
+    expect(createEntry).toHaveBeenCalledTimes(1);
+    expect(await screen.findByText("Entry added locally.")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /Toggle verified for Local-only saved entry/i }));
+    expect(await screen.findByText("Verified state updated locally.")).toBeInTheDocument();
   });
 });
