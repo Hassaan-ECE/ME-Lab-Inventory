@@ -65,6 +65,19 @@ export interface InventorySharedStatus {
   syncIntervalMs?: number;
 }
 
+export type UpdateStatus = "idle" | "checking" | "available" | "not-available" | "downloading" | "ready" | "error";
+
+export interface UpdateState {
+  available: boolean;
+  currentVersion: string;
+  downloadedInstallerPath?: string;
+  error?: string;
+  latestVersion?: string;
+  notes?: string;
+  publishedAt?: string;
+  status: UpdateStatus;
+}
+
 export interface FilterState {
   assetNumber: string;
   manufacturer: string;

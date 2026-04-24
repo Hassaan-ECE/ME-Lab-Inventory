@@ -24,12 +24,14 @@ interface InventoryDbModule {
   loadInventoryEntries: (runtimeContext: RuntimeContext) => {
     dbPath: string;
     entries: InventoryEntry[];
+    entriesChanged?: boolean;
     shared: { canModify: boolean; hasLocalOnlyChanges?: boolean; message: string; mutationMode?: "shared" | "local" };
   };
   setArchivedEntry: (runtimeContext: RuntimeContext, entryId: string, archived: boolean) => InventoryEntry;
   syncInventoryWithShared: (runtimeContext: RuntimeContext) => {
     dbPath: string;
     entries: InventoryEntry[];
+    entriesChanged?: boolean;
     shared: { canModify: boolean; hasLocalOnlyChanges?: boolean; mutationMode?: "shared" | "local"; sharedDbPath?: string };
   };
   toggleVerifiedEntry: (runtimeContext: RuntimeContext, entryId: string, nextVerified: boolean) => InventoryEntry;
@@ -142,7 +144,30 @@ describe("inventory desktop database mutations", () => {
 
     expect(fs.existsSync(sharedDbPath)).toBe(true);
     expect(result.shared.canModify).toBe(true);
-    expect(result.entries).toHaveLength(inventoryDb.loadInventoryEntries(runtimeContext).entries.length);
+    expect(result.entriesChanged).toBe(false);
+    expect(inventoryDb.loadInventoryEntries(runtimeContext).entries.length).toBeGreaterThan(0);
+  });
+
+  it("does not rewrite either database when equal revisions have no entry changes", () => {
+    const runtimeContext = buildRuntimeContext(tempDir);
+    const firstSync = inventoryDb.syncInventoryWithShared(runtimeContext);
+    const sharedDbPath = firstSync.shared.sharedDbPath;
+    expect(sharedDbPath).toBeTruthy();
+
+    const localDbPath = path.join(tempDir, "data", "me_inventory.db");
+    const beforeLocalStat = fs.statSync(localDbPath);
+    const beforeSharedStat = fs.statSync(sharedDbPath!);
+    const beforeLocalRevision = getDbRevision(localDbPath);
+    const beforeSharedRevision = getDbRevision(sharedDbPath!);
+
+    const result = inventoryDb.syncInventoryWithShared(runtimeContext);
+
+    expect(result.entriesChanged).toBe(false);
+    expect(result.entries).toHaveLength(0);
+    expect(getDbRevision(localDbPath)).toBe(beforeLocalRevision);
+    expect(getDbRevision(sharedDbPath!)).toBe(beforeSharedRevision);
+    expect(fs.statSync(localDbPath).mtimeMs).toBe(beforeLocalStat.mtimeMs);
+    expect(fs.statSync(sharedDbPath!).mtimeMs).toBe(beforeSharedStat.mtimeMs);
   });
 
   it("pulls shared changes into the local cache", () => {
@@ -162,13 +187,14 @@ describe("inventory desktop database mutations", () => {
 
     const result = inventoryDb.syncInventoryWithShared(runtimeContext);
 
+    expect(result.entriesChanged).toBe(true);
     expect(result.entries.some((entry) => entry.description === "Updated from shared test")).toBe(true);
   });
 
   it("overwrites divergent local cache rows with shared authority", () => {
     const runtimeContext = buildRuntimeContext(tempDir);
-    const syncResult = inventoryDb.syncInventoryWithShared(runtimeContext);
-    const target = syncResult.entries[0];
+    inventoryDb.syncInventoryWithShared(runtimeContext);
+    const target = inventoryDb.loadInventoryEntries(runtimeContext).entries[0];
     const targetUuid = target.entryUuid ?? "";
     const localDb = new DatabaseSync(path.join(tempDir, "data", "me_inventory.db"));
     localDb.prepare("UPDATE entries SET description = ? WHERE entry_uuid = ?").run("Local divergent value", targetUuid);
@@ -177,6 +203,7 @@ describe("inventory desktop database mutations", () => {
     const result = inventoryDb.syncInventoryWithShared(runtimeContext);
     const refreshed = result.entries.find((entry) => entry.entryUuid === targetUuid);
 
+    expect(result.entriesChanged).toBe(true);
     expect(refreshed?.description).toBe(target.description);
   });
 
@@ -267,7 +294,8 @@ describe("inventory desktop database mutations", () => {
     expect(syncResult.shared.canModify).toBe(true);
     expect(syncResult.shared.mutationMode).toBe("shared");
     expect(syncResult.shared.hasLocalOnlyChanges).toBe(false);
-    expect(syncResult.entries.some((entry) => entry.id === created.id)).toBe(true);
+    expect(syncResult.entriesChanged).toBe(false);
+    expect(inventoryDb.loadInventoryEntries(runtimeContext).entries.some((entry) => entry.id === created.id)).toBe(true);
 
     const sharedDbPath = syncResult.shared.sharedDbPath;
     expect(sharedDbPath).toBeTruthy();

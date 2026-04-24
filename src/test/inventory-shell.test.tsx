@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { InventoryShell } from "@/components/inventory/InventoryShell";
@@ -34,7 +34,7 @@ describe("InventoryShell shell", () => {
     render(<InventoryShell />);
 
     expect(screen.getAllByText("ME Inventory")).toHaveLength(1);
-    expect(screen.getByText("v0.9.0")).toBeInTheDocument();
+    expect(screen.getByText("v0.9.5")).toBeInTheDocument();
     expect(screen.queryByText(/prototype/i)).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Import Data" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Export/i })).toBeInTheDocument();
@@ -117,6 +117,128 @@ describe("InventoryShell shell", () => {
     expect(await screen.findByText("Showing all 2 entries")).toBeInTheDocument();
     expect(screen.getByText("Bridgeport")).toBeInTheDocument();
     expect(screen.getByText("Total: 2 | Verified: 1/2")).toBeInTheDocument();
+  });
+
+  it("keeps current rows when desktop sync reports no entry changes", async () => {
+    const desktopEntries: InventoryEntry[] = [
+      {
+        id: "301",
+        assetNumber: "ME-301",
+        qty: 1,
+        manufacturer: "Stable Maker",
+        model: "SM-1",
+        description: "Stable entry",
+        projectName: "Sync",
+        location: "Bench",
+        links: "",
+        notes: "",
+        lifecycleStatus: "active",
+        workingStatus: "working",
+        verifiedInSurvey: true,
+        archived: false,
+        updatedAt: "2026-04-23 10:00:00",
+      },
+    ];
+
+    window.inventoryDesktop = {
+      isDesktop: true,
+      loadInventory: vi.fn().mockResolvedValue({
+        dbPath: "D:/coding/ME Inventory/data/me_inventory.db",
+        entries: desktopEntries,
+        shared: CONNECTED_SHARED_STATUS,
+      }),
+      syncInventory: vi.fn().mockResolvedValue({
+        dbPath: "D:/coding/ME Inventory/data/me_inventory.db",
+        entries: [{ ...desktopEntries[0], manufacturer: "Replacement Maker" }],
+        entriesChanged: false,
+        shared: CONNECTED_SHARED_STATUS,
+      }),
+      toggleVerifiedEntry: vi.fn().mockResolvedValue(desktopEntries[0]),
+      createEntry: vi.fn().mockResolvedValue(desktopEntries[0]),
+      updateEntry: vi.fn().mockResolvedValue(desktopEntries[0]),
+      setArchivedEntry: vi.fn().mockResolvedValue(desktopEntries[0]),
+      deleteEntry: vi.fn().mockResolvedValue({ entryId: desktopEntries[0].id }),
+      openExternal: vi.fn().mockResolvedValue(true),
+      openPath: vi.fn().mockResolvedValue(true),
+      pickPicturePath: vi.fn().mockResolvedValue(null),
+      exportExcel: vi.fn().mockResolvedValue({ canceled: false, outputPath: "D:/exports/ME_Inventory_Export.xlsx" }),
+    };
+
+    render(<InventoryShell />);
+
+    expect(await screen.findByText("Stable Maker")).toBeInTheDocument();
+    await waitFor(() => expect(window.inventoryDesktop?.syncInventory).toHaveBeenCalled());
+    expect(screen.getByText("Stable Maker")).toBeInTheDocument();
+    expect(screen.queryByText("Replacement Maker")).not.toBeInTheDocument();
+  });
+
+  it("shows the shared update button and transitions through download states", async () => {
+    const user = userEvent.setup();
+    let resolveDownload: (state: {
+      available: boolean;
+      currentVersion: string;
+      latestVersion: string;
+      status: "ready";
+    }) => void = () => undefined;
+    const downloadPromise = new Promise<{
+      available: boolean;
+      currentVersion: string;
+      latestVersion: string;
+      status: "ready";
+    }>((resolve) => {
+      resolveDownload = resolve;
+    });
+
+    window.inventoryDesktop = {
+      isDesktop: true,
+      loadInventory: vi.fn().mockResolvedValue({
+        dbPath: "D:/coding/ME Inventory/data/me_inventory.db",
+        entries: [],
+        shared: CONNECTED_SHARED_STATUS,
+      }),
+      syncInventory: vi.fn().mockResolvedValue({
+        dbPath: "D:/coding/ME Inventory/data/me_inventory.db",
+        entries: [],
+        shared: CONNECTED_SHARED_STATUS,
+      }),
+      toggleVerifiedEntry: vi.fn().mockResolvedValue(null),
+      createEntry: vi.fn().mockResolvedValue(null),
+      updateEntry: vi.fn().mockResolvedValue(null),
+      setArchivedEntry: vi.fn().mockResolvedValue(null),
+      deleteEntry: vi.fn().mockResolvedValue({ entryId: "0" }),
+      openExternal: vi.fn().mockResolvedValue(true),
+      openPath: vi.fn().mockResolvedValue(true),
+      pickPicturePath: vi.fn().mockResolvedValue(null),
+      exportExcel: vi.fn().mockResolvedValue({ canceled: false, outputPath: "D:/exports/ME_Inventory_Export.xlsx" }),
+      checkForUpdate: vi.fn().mockResolvedValue({
+        available: true,
+        currentVersion: "0.9.5",
+        latestVersion: "0.9.6",
+        status: "available",
+      }),
+      downloadUpdate: vi.fn().mockReturnValue(downloadPromise),
+      installUpdate: vi.fn().mockResolvedValue(undefined),
+    };
+
+    render(<InventoryShell />);
+
+    const updateButton = await screen.findByRole("button", { name: "Update available" });
+    expect(updateButton.className).toContain("bg-sky-100");
+    expect(updateButton.className).toContain("border-sky-500");
+    expect(updateButton.className).toContain("text-sky-700");
+
+    await user.click(updateButton);
+    expect(await screen.findByRole("button", { name: "Downloading update..." })).toBeDisabled();
+
+    resolveDownload({
+      available: true,
+      currentVersion: "0.9.5",
+      latestVersion: "0.9.6",
+      status: "ready",
+    });
+
+    await user.click(await screen.findByRole("button", { name: "Install update" }));
+    expect(window.inventoryDesktop?.installUpdate).toHaveBeenCalledTimes(1);
   });
 
   it("switches to archive view and updates the summary", async () => {

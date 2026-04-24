@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { APP_VERSION } from "@/branding";
 import { cn } from "@/lib/utils";
-import type { InventoryScope, ThemeMode } from "@/types/inventory";
+import type { InventoryScope, ThemeMode, UpdateState } from "@/types/inventory";
 
 interface InventoryHeaderProps {
   archiveCount: number;
@@ -15,8 +15,10 @@ interface InventoryHeaderProps {
   onExportHtml: () => void;
   onScopeChange: (scope: InventoryScope) => void;
   onThemeToggle: () => void;
+  onUpdateAction: () => void;
   scope: InventoryScope;
   theme: ThemeMode;
+  updateState: UpdateState;
 }
 
 export function InventoryHeader({
@@ -28,8 +30,10 @@ export function InventoryHeader({
   onExportHtml,
   onScopeChange,
   onThemeToggle,
+  onUpdateAction,
   scope,
   theme,
+  updateState,
 }: InventoryHeaderProps) {
   const [exportOpen, setExportOpen] = useState(false);
   const exportMenuRef = useRef<HTMLDivElement | null>(null);
@@ -75,6 +79,7 @@ export function InventoryHeader({
         <div className="flex min-w-0 items-baseline gap-2">
           <h1 className="min-w-0 text-2xl font-semibold tracking-tight text-foreground">ME Inventory</h1>
           <span className="text-xs font-semibold text-muted-foreground">v{APP_VERSION}</span>
+          <UpdateActionButton state={updateState} onClick={onUpdateAction} />
         </div>
 
         <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
@@ -155,4 +160,46 @@ export function InventoryHeader({
       </div>
     </header>
   );
+}
+
+interface UpdateActionButtonProps {
+  state: UpdateState;
+  onClick: () => void;
+}
+
+function UpdateActionButton({ state, onClick }: UpdateActionButtonProps) {
+  if (!state.available && state.status !== "ready") {
+    return null;
+  }
+
+  const label = getUpdateActionLabel(state);
+  if (!label) {
+    return null;
+  }
+
+  return (
+    <button
+      className="ml-1 inline-flex h-7 shrink-0 items-center justify-center rounded-lg border border-sky-500 bg-sky-100 px-2.5 text-xs font-semibold text-sky-700 transition-colors hover:bg-sky-200 disabled:cursor-default disabled:opacity-80 dark:border-sky-400/70 dark:bg-sky-950/50 dark:text-sky-200 dark:hover:bg-sky-900/70"
+      disabled={state.status === "downloading" || state.status === "checking"}
+      type="button"
+      onClick={onClick}
+    >
+      {label}
+    </button>
+  );
+}
+
+function getUpdateActionLabel(state: UpdateState): string {
+  switch (state.status) {
+    case "available":
+      return "Update available";
+    case "downloading":
+      return "Downloading update...";
+    case "ready":
+      return "Install update";
+    case "error":
+      return "Retry update";
+    default:
+      return "";
+  }
 }

@@ -14,9 +14,17 @@ contextBridge.exposeInMainWorld("inventoryDesktop", {
   openPath: (targetPath) => ipcRenderer.invoke("inventory:open-path", targetPath),
   pickPicturePath: () => ipcRenderer.invoke("inventory:pick-picture-path"),
   exportExcel: () => ipcRenderer.invoke("inventory:export-excel"),
+  checkForUpdate: () => ipcRenderer.invoke("inventory:update:check"),
+  downloadUpdate: () => ipcRenderer.invoke("inventory:update:download"),
+  installUpdate: () => ipcRenderer.invoke("inventory:update:install"),
   onSharedInventoryChanged: (callback) => {
     const listener = () => callback();
     ipcRenderer.on("inventory:shared-changed", listener);
     return () => ipcRenderer.removeListener("inventory:shared-changed", listener);
+  },
+  onUpdateStateChanged: (callback) => {
+    const listener = (_event, state) => callback(state);
+    ipcRenderer.on("inventory:update-state-changed", listener);
+    return () => ipcRenderer.removeListener("inventory:update-state-changed", listener);
   },
 });

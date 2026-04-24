@@ -1,4 +1,5 @@
 import { ArrowUpDownIcon, CheckIcon } from "lucide-react";
+import { memo } from "react";
 import type { CSSProperties } from "react";
 
 import { Badge } from "@/components/ui/badge";
@@ -19,7 +20,7 @@ interface InventoryTableProps {
   sortState: SortState;
 }
 
-export function InventoryTable({
+export const InventoryTable = memo(function InventoryTable({
   activeEntryId = null,
   canModifyEntries,
   colorRows,
@@ -40,7 +41,7 @@ export function InventoryTable({
               <col key={column.key} style={getColumnStyle(column.key)} />
             ))}
           </colgroup>
-          <thead className="sticky top-0 z-10 bg-background/95 backdrop-blur-sm">
+          <thead className="sticky top-0 z-10 bg-background">
             <tr>
               {columns.map((column) => (
                 <th
@@ -109,7 +110,7 @@ export function InventoryTable({
       </div>
     </section>
   );
-}
+});
 
 function renderCell(
   entry: InventoryEntry,

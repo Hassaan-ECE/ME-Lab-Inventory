@@ -2,7 +2,7 @@
 
 ME Inventory is an Electron desktop application for managing ME lab inventory entries. It uses a SQLite-backed local cache, optional shared-drive synchronization, archive handling, searchable/sortable tables, entry editing, and Excel export.
 
-Current app display name: `ME Inventory v0.9.0`.
+Current app display name: `ME Inventory v0.9.5`.
 
 ## Current Status
 
@@ -23,13 +23,13 @@ Implemented:
 - shared SQLite synchronization with local offline mutation fallback
 - legacy database filename and schema migration
 - persisted theme, Color Rows, and column visibility preferences
+- shared-drive update check, background download, checksum verification, and installer handoff
 
 Not implemented yet:
 
 - importing from Excel or another database
 - HTML export generation
 - quick-edit dialog parity with the original Python app
-- updater flow redesign
 - TE / template variants
 
 ## App Behavior
@@ -168,6 +168,16 @@ When shared storage becomes available again, sync compares local and shared nume
 - if shared revision is newer or equal, shared DB is copied to local
 - no conflict UI is implemented; revision wins
 
+Idle shared syncs are read-only when local and shared revisions have not changed. The app does not rewrite either SQLite file, reload all entries, or repaint the table unless the shared or local entry data actually changes.
+
+## Shared Updates
+
+The desktop app checks the shared update manifest at:
+
+- `S:\Manufacturing\Internal\_Syed_H_Shah\InventoryApps\ME\current.json`
+
+When the manifest advertises a newer version than the running app, a blue `Update available` button appears beside the `ME Inventory` title. Clicking it copies the installer to the local app data update cache in the background and verifies the manifest SHA-256. After the download is verified, the button changes to `Install update`; clicking it closes the app, runs the installer silently, and reopens the installed app.
+
 ## Excel Export
 
 `Export > Excel` is implemented in the Electron main process.
@@ -271,13 +281,13 @@ Current packaging notes:
 - packaged product name: `ME Inventory`
 - app id: `com.syedhassaan.me-inventory`
 - package name: `me-inventory`
-- version: `0.9.0`
+- version: `0.9.5`
 - the database is included through `extraResources`
 - the app, installer, and executable use `electron/assets/app_icon.ico`
 
 Typical packaged output:
 
-- `release/ME Inventory Setup 0.9.0.exe`
+- `release/ME Inventory Setup 0.9.5.exe`
 
 ## Repository Layout
 

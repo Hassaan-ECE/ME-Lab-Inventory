@@ -76,6 +76,10 @@ export function ensureInventorySchema(dbPath) {
   const db = new DatabaseSync(dbPath);
 
   try {
+    if (hasCurrentInventorySchema(db)) {
+      return;
+    }
+
     db.exec("PRAGMA foreign_keys = OFF");
     db.exec("BEGIN IMMEDIATE");
     migrateInventorySchema(db);
@@ -91,6 +95,20 @@ export function ensureInventorySchema(dbPath) {
   } finally {
     db.close();
   }
+}
+
+function hasCurrentInventorySchema(db) {
+  const versionRow = db.prepare("PRAGMA user_version").get();
+  const version = Number(versionRow?.user_version ?? 0);
+
+  return (
+    version >= INVENTORY_SCHEMA_VERSION &&
+    tableExists(db, "entries") &&
+    columnExists(db, "entries", "entry_id") &&
+    columnExists(db, "entries", "entry_uuid") &&
+    tableExists(db, "entry_search") &&
+    !tableExists(db, "equipment")
+  );
 }
 
 function resolveCurrentDatabaseFromDirectories(dataDirs, missingMessage) {

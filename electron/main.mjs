@@ -15,6 +15,7 @@ import {
 } from "./inventory-db.mjs";
 import { exportExcelInventory } from "./inventory-export.mjs";
 import { resolveSharedDbPath, resolveSharedDirectoryPath } from "./inventory-runtime.mjs";
+import { createSharedUpdater } from "./updater.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -22,11 +23,11 @@ const projectRoot = path.resolve(__dirname, "..");
 const preloadPath = path.join(__dirname, "preload.mjs");
 const appIconPath = path.join(__dirname, "assets", "app_icon.ico");
 const devServerUrl = process.env.VITE_DEV_SERVER_URL;
-const appDisplayName = "ME Inventory v0.9.0";
 
 let mainWindow = null;
 let sharedWatcher = null;
 let sharedWatchDebounce = null;
+let sharedUpdater = null;
 
 function buildRuntimeContext() {
   return {
@@ -46,7 +47,7 @@ function createMainWindow() {
     autoHideMenuBar: true,
     backgroundColor: "#0a0a0b",
     icon: appIconPath,
-    title: appDisplayName,
+    title: buildAppDisplayName(),
     webPreferences: {
       preload: preloadPath,
       contextIsolation: true,
@@ -87,6 +88,27 @@ function createMainWindow() {
   });
 
   refreshSharedWatcher();
+}
+
+function buildAppDisplayName() {
+  return `ME Inventory v${app.getVersion()}`;
+}
+
+function getSharedUpdater() {
+  if (sharedUpdater) {
+    return sharedUpdater;
+  }
+
+  sharedUpdater = createSharedUpdater({
+    currentVersion: app.getVersion(),
+    executablePath: process.execPath,
+    userDataPath: app.getPath("userData"),
+  });
+  sharedUpdater.onStateChanged((state) => {
+    mainWindow?.webContents.send("inventory:update-state-changed", state);
+  });
+
+  return sharedUpdater;
 }
 
 function refreshSharedWatcher() {
@@ -179,6 +201,12 @@ app.whenReady().then(() => {
       showSaveDialog: (options) => dialog.showSaveDialog(mainWindow, options),
     }),
   );
+  ipcMain.handle("inventory:update:check", () => getSharedUpdater().checkForUpdate());
+  ipcMain.handle("inventory:update:download", () => getSharedUpdater().downloadUpdate());
+  ipcMain.handle("inventory:update:install", () => {
+    getSharedUpdater().installUpdate();
+    setTimeout(() => app.quit(), 100);
+  });
 
   createMainWindow();
 

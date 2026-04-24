@@ -1,6 +1,13 @@
 declare module "../../electron/inventory-db.mjs" {
   import type { InventoryEntry, InventoryEntryInput, InventorySharedStatus } from "@/types/inventory";
 
+  interface InventorySyncResult {
+    dbPath: string;
+    entries: InventoryEntry[];
+    entriesChanged?: boolean;
+    shared: InventorySharedStatus;
+  }
+
   interface RuntimeContext {
     appPath: string;
     isPackaged: boolean;
@@ -8,17 +15,9 @@ declare module "../../electron/inventory-db.mjs" {
     userDataPath: string;
   }
 
-  export function loadInventoryEntries(runtimeContext: RuntimeContext): {
-    dbPath: string;
-    entries: InventoryEntry[];
-    shared: InventorySharedStatus;
-  };
+  export function loadInventoryEntries(runtimeContext: RuntimeContext): InventorySyncResult;
 
-  export function syncInventoryWithShared(runtimeContext: RuntimeContext): {
-    dbPath: string;
-    entries: InventoryEntry[];
-    shared: InventorySharedStatus;
-  };
+  export function syncInventoryWithShared(runtimeContext: RuntimeContext): InventorySyncResult;
 
   export function createInventoryEntry(
     runtimeContext: RuntimeContext,

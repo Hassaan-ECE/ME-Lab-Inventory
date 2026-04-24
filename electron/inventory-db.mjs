@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -44,6 +44,7 @@ const SELECT_FIELDS = `
   updated_at
 `;
 const SELECT_SQL = `SELECT ${SELECT_FIELDS} FROM entries ORDER BY updated_at DESC, entry_id DESC`;
+let lastNoChangeSyncKey = "";
 
 export function loadInventoryEntries(runtimeContext) {
   const dbPath = resolveDbPath(runtimeContext);
@@ -61,26 +62,71 @@ export function syncInventoryWithShared(runtimeContext) {
     const sharedDbPath = ensureSharedDatabase(dbPath);
     const localRevision = ensureNumericRevision(dbPath, "local_sync_check");
     const sharedRevision = ensureNumericRevision(sharedDbPath, "shared_sync_check");
-    const revision = Math.max(localRevision, sharedRevision);
 
     if (localRevision > sharedRevision) {
       replaceDatabaseFile(dbPath, sharedDbPath);
-    } else {
-      replaceDatabaseFile(sharedDbPath, dbPath);
+      setRevisionForPath(sharedDbPath, localRevision, SHARED_SYNC_MARKER);
+      setRevisionForPath(dbPath, localRevision, SHARED_SYNC_MARKER);
+      return {
+        dbPath,
+        entries: [],
+        entriesChanged: false,
+        shared: buildSharedStatus({
+          available: true,
+          canModify: true,
+          message: SHARED_CONNECTED_MESSAGE,
+          mutationMode: "shared",
+          revision: localRevision,
+          sharedDbPath,
+        }),
+      };
     }
 
-    setRevisionForPath(sharedDbPath, revision, SHARED_SYNC_MARKER);
-    setRevisionForPath(dbPath, revision, SHARED_SYNC_MARKER);
+    if (sharedRevision > localRevision) {
+      replaceDatabaseFile(sharedDbPath, dbPath);
+      return {
+        dbPath,
+        entries: loadInventoryEntriesFromPath(dbPath),
+        entriesChanged: true,
+        shared: buildSharedStatus({
+          available: true,
+          canModify: true,
+          message: SHARED_CONNECTED_MESSAGE,
+          mutationMode: "shared",
+          revision: sharedRevision,
+          sharedDbPath,
+        }),
+      };
+    }
+
+    if (entryDataMatchesForEqualRevision(dbPath, sharedDbPath, localRevision)) {
+      return {
+        dbPath,
+        entries: [],
+        entriesChanged: false,
+        shared: buildSharedStatus({
+          available: true,
+          canModify: true,
+          message: SHARED_CONNECTED_MESSAGE,
+          mutationMode: "shared",
+          revision: localRevision,
+          sharedDbPath,
+        }),
+      };
+    }
+
+    replaceDatabaseFile(sharedDbPath, dbPath);
 
     return {
       dbPath,
       entries: loadInventoryEntriesFromPath(dbPath),
+      entriesChanged: true,
       shared: buildSharedStatus({
         available: true,
         canModify: true,
         message: SHARED_CONNECTED_MESSAGE,
         mutationMode: "shared",
-        revision,
+        revision: sharedRevision,
         sharedDbPath,
       }),
     };
@@ -88,6 +134,7 @@ export function syncInventoryWithShared(runtimeContext) {
     return {
       dbPath,
       entries: loadInventoryEntriesFromPath(dbPath),
+      entriesChanged: true,
       shared: buildUnavailableSharedStatus(error, dbPath),
     };
   }
@@ -359,6 +406,7 @@ function runSharedMutation(sharedDbPath, mutate) {
     mutate(db);
     incrementSharedRevision(db);
     db.exec("COMMIT");
+    clearNoChangeSyncCache();
   } catch (error) {
     try {
       db.exec("ROLLBACK");
@@ -387,6 +435,7 @@ function runLocalMutation(localDbPath, mutate) {
     mutate(db);
     incrementLocalRevision(db);
     db.exec("COMMIT");
+    clearNoChangeSyncCache();
   } catch (error) {
     try {
       db.exec("ROLLBACK");
@@ -405,10 +454,64 @@ function replaceDatabaseFile(sourcePath, targetPath) {
     return;
   }
 
+  clearNoChangeSyncCache();
   fs.mkdirSync(path.dirname(targetPath), { recursive: true });
   removeSqliteSidecars(targetPath);
   fs.copyFileSync(sourcePath, targetPath);
   removeSqliteSidecars(targetPath);
+}
+
+function clearNoChangeSyncCache() {
+  lastNoChangeSyncKey = "";
+}
+
+function entryDataMatchesForEqualRevision(localDbPath, sharedDbPath, revision) {
+  if (isSamePath(localDbPath, sharedDbPath)) {
+    return true;
+  }
+
+  const syncKey = buildEqualRevisionSyncKey(localDbPath, sharedDbPath, revision);
+  if (syncKey && syncKey === lastNoChangeSyncKey) {
+    return true;
+  }
+
+  const matches = getEntryDataFingerprint(localDbPath) === getEntryDataFingerprint(sharedDbPath);
+  lastNoChangeSyncKey = matches && syncKey ? syncKey : "";
+  return matches;
+}
+
+function buildEqualRevisionSyncKey(localDbPath, sharedDbPath, revision) {
+  try {
+    const localStat = fs.statSync(localDbPath);
+    const sharedStat = fs.statSync(sharedDbPath);
+    return [
+      path.resolve(localDbPath).toLowerCase(),
+      path.resolve(sharedDbPath).toLowerCase(),
+      revision,
+      localStat.size,
+      localStat.mtimeMs,
+      sharedStat.size,
+      sharedStat.mtimeMs,
+    ].join("|");
+  } catch {
+    return "";
+  }
+}
+
+function getEntryDataFingerprint(dbPath) {
+  const db = new DatabaseSync(dbPath, { readOnly: true });
+
+  try {
+    const rows = db.prepare(`SELECT ${SELECT_FIELDS} FROM entries ORDER BY entry_uuid, entry_id`).all();
+    const hash = createHash("sha256");
+    for (const row of rows) {
+      hash.update(JSON.stringify(row));
+      hash.update("\n");
+    }
+    return hash.digest("hex");
+  } finally {
+    db.close();
+  }
 }
 
 function removeSqliteSidecars(dbPath) {

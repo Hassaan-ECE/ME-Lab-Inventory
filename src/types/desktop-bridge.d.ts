@@ -1,19 +1,18 @@
-import type { InventoryEntry, InventoryEntryInput, InventorySharedStatus } from "@/types/inventory";
+import type { InventoryEntry, InventoryEntryInput, InventorySharedStatus, UpdateState } from "@/types/inventory";
+
+export interface InventorySyncResult {
+  dbPath: string;
+  entries: InventoryEntry[];
+  entriesChanged?: boolean;
+  shared: InventorySharedStatus;
+}
 
 declare global {
   interface Window {
     inventoryDesktop?: {
       isDesktop: boolean;
-      loadInventory: () => Promise<{
-        dbPath: string;
-        entries: InventoryEntry[];
-        shared?: InventorySharedStatus;
-      }>;
-      syncInventory: () => Promise<{
-        dbPath: string;
-        entries: InventoryEntry[];
-        shared: InventorySharedStatus;
-      }>;
+      loadInventory: () => Promise<InventorySyncResult>;
+      syncInventory: () => Promise<InventorySyncResult>;
       toggleVerifiedEntry: (entryId: string, nextVerified: boolean) => Promise<InventoryEntry>;
       createEntry: (input: InventoryEntryInput) => Promise<InventoryEntry>;
       updateEntry: (entryId: string, input: InventoryEntryInput) => Promise<InventoryEntry>;
@@ -27,9 +26,11 @@ declare global {
         error?: string;
         outputPath?: string;
       }>;
+      checkForUpdate?: () => Promise<UpdateState>;
+      downloadUpdate?: () => Promise<UpdateState>;
+      installUpdate?: () => Promise<void>;
       onSharedInventoryChanged?: (callback: () => void) => () => void;
+      onUpdateStateChanged?: (callback: (state: UpdateState) => void) => () => void;
     };
   }
 }
-
-export {};

@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 
+import { APP_VERSION } from "@/branding";
 import { ColumnMenu } from "@/components/inventory/ColumnMenu";
 import { EmptyResults } from "@/components/inventory/EmptyResults";
 import { FilterPanel } from "@/components/inventory/FilterPanel";
@@ -31,6 +32,7 @@ import type {
   InventoryScope,
   SortState,
   ThemeMode,
+  UpdateState,
 } from "@/types/inventory";
 
 const THEME_STORAGE_KEY = "meInventory.theme";
@@ -82,7 +84,9 @@ export function InventoryShell() {
   const [statusOverride, setStatusOverride] = useState<string | null>(null);
   const [dialogState, setDialogState] = useState<DialogState | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+  const [updateState, setUpdateState] = useState<UpdateState>(() => buildIdleUpdateState());
   const statusTimeoutRef = useRef<number | null>(null);
+  const syncInFlightRef = useRef(false);
 
   const markSharedUnavailable = useCallback((message = "Shared workspace unavailable. Saving changes locally."): void => {
     setSharedStatus((current) => ({
@@ -102,19 +106,27 @@ export function InventoryShell() {
       if (!window.inventoryDesktop?.syncInventory) {
         return;
       }
+      if (syncInFlightRef.current) {
+        return;
+      }
 
       try {
+        syncInFlightRef.current = true;
         const payload = await window.inventoryDesktop.syncInventory();
         if (!applyResult) {
           return;
         }
-        setEntries(payload.entries);
+        if (payload.entriesChanged !== false) {
+          setEntries(payload.entries);
+        }
         setDataSource("desktop");
-        setSharedStatus(payload.shared);
+        setSharedStatus((current) => (sharedStatusesMatch(current, payload.shared) ? current : payload.shared));
       } catch {
         if (applyResult) {
           markSharedUnavailable();
         }
+      } finally {
+        syncInFlightRef.current = false;
       }
     },
     [markSharedUnavailable],
@@ -185,6 +197,37 @@ export function InventoryShell() {
   }, [syncEntriesFromDesktop]);
 
   useEffect(() => {
+    if (!window.inventoryDesktop?.checkForUpdate) {
+      return undefined;
+    }
+
+    let active = true;
+    const unsubscribe = window.inventoryDesktop.onUpdateStateChanged?.((state) => {
+      if (active) {
+        setUpdateState(state);
+      }
+    });
+
+    void window.inventoryDesktop
+      .checkForUpdate()
+      .then((state) => {
+        if (active) {
+          setUpdateState(state);
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setUpdateState(buildIdleUpdateState());
+        }
+      });
+
+    return () => {
+      active = false;
+      unsubscribe?.();
+    };
+  }, []);
+
+  useEffect(() => {
     if (!window.inventoryDesktop?.syncInventory) {
       return undefined;
     }
@@ -205,17 +248,25 @@ export function InventoryShell() {
     };
   }, [sharedStatus.syncIntervalMs, syncEntriesFromDesktop]);
 
-  const filteredEntries = filterEntries(entries, scope, query, filters);
-  const sortedEntries = sortEntries(filteredEntries, sortState);
-  const counts = getInventoryCounts(entries);
+  const deferredQuery = useDeferredValue(query);
+  const deferredFilters = useDeferredValue(filters);
+  const filteredEntries = useMemo(
+    () => filterEntries(entries, scope, deferredQuery, deferredFilters),
+    [deferredFilters, deferredQuery, entries, scope],
+  );
+  const sortedEntries = useMemo(() => sortEntries(filteredEntries, sortState), [filteredEntries, sortState]);
+  const counts = useMemo(() => getInventoryCounts(entries), [entries]);
   const canModifyEntries = dataSource !== "desktop" || sharedStatus.canModify;
-  const resultsLabel = isLoading ? "Loading inventory entries..." : buildResultsLabel(sortedEntries.length, scope, query, filters);
-  const visibleColumns = getVisibleColumns(columnVisibility);
+  const resultsLabel = isLoading
+    ? "Loading inventory entries..."
+    : buildResultsLabel(sortedEntries.length, scope, deferredQuery, deferredFilters);
+  const visibleColumns = useMemo(() => getVisibleColumns(columnVisibility), [columnVisibility]);
+  const entriesById = useMemo(() => new Map(entries.map((entry) => [entry.id, entry])), [entries]);
   const statusMessage = isLoading
     ? "Loading ME inventory database..."
     : statusOverride ?? buildDefaultStatusMessage(counts.total, counts.verified, dataSource, sharedStatus);
-  const dialogEntry = dialogState?.mode === "edit" ? entries.find((entry) => entry.id === dialogState.entryId) ?? null : null;
-  const contextEntry = contextMenu ? entries.find((entry) => entry.id === contextMenu.entryId) ?? null : null;
+  const dialogEntry = dialogState?.mode === "edit" ? entriesById.get(dialogState.entryId ?? "") ?? null : null;
+  const contextEntry = contextMenu ? entriesById.get(contextMenu.entryId) ?? null : null;
 
   function announceStatus(message: string): void {
     setStatusOverride(message);
@@ -230,9 +281,7 @@ export function InventoryShell() {
   }
 
   async function runDesktopMutation<Result>(operation: () => Promise<Result>): Promise<Result> {
-    const result = await operation();
-    void syncEntriesFromDesktop();
-    return result;
+    return operation();
   }
 
   function getDesktopMutationMessage(sharedMessage: string, localMessage: string): string {
@@ -442,6 +491,41 @@ export function InventoryShell() {
     }
   }
 
+  async function handleUpdateAction(): Promise<void> {
+    if (!window.inventoryDesktop) {
+      return;
+    }
+
+    try {
+      if (updateState.status === "ready") {
+        await window.inventoryDesktop.installUpdate?.();
+        return;
+      }
+
+      if (updateState.status === "downloading" || updateState.status === "checking") {
+        return;
+      }
+
+      if (!window.inventoryDesktop.downloadUpdate) {
+        announceStatus("Update download is only available in the desktop app.");
+        return;
+      }
+
+      if (updateState.available) {
+        setUpdateState((current) => ({ ...current, status: "downloading" }));
+      }
+      const nextState = await window.inventoryDesktop.downloadUpdate();
+      setUpdateState(nextState);
+      if (nextState.status === "error" && nextState.error) {
+        announceStatus(nextState.error);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Update failed.";
+      setUpdateState((current) => ({ ...current, error: message, status: "error" }));
+      announceStatus(message);
+    }
+  }
+
   function handleExportHtml(): void {
     announceStatus("HTML export is not implemented yet.");
   }
@@ -556,6 +640,10 @@ export function InventoryShell() {
           onThemeToggle={handleThemeToggle}
           scope={scope}
           theme={theme}
+          updateState={updateState}
+          onUpdateAction={() => {
+            void handleUpdateAction();
+          }}
         />
 
         <div className="flex min-h-0 flex-1 overflow-hidden px-3 py-4 sm:px-5">
@@ -631,6 +719,29 @@ export function InventoryShell() {
         />
       ) : null}
     </div>
+  );
+}
+
+function buildIdleUpdateState(): UpdateState {
+  return {
+    available: false,
+    currentVersion: APP_VERSION,
+    status: "idle",
+  };
+}
+
+function sharedStatusesMatch(left: InventorySharedStatus, right: InventorySharedStatus): boolean {
+  return (
+    left.available === right.available &&
+    left.canModify === right.canModify &&
+    left.enabled === right.enabled &&
+    left.hasLocalOnlyChanges === right.hasLocalOnlyChanges &&
+    left.message === right.message &&
+    left.mutationMode === right.mutationMode &&
+    left.revision === right.revision &&
+    left.sharedDbPath === right.sharedDbPath &&
+    left.sharedRootPath === right.sharedRootPath &&
+    left.syncIntervalMs === right.syncIntervalMs
   );
 }
 
