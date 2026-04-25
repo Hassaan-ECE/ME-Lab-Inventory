@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { APP_DISPLAY_NAME, APP_VERSION } from "@/branding";
 import { InventoryShell } from "@/components/inventory/InventoryShell";
-import type { InventoryEntry, InventorySharedStatus } from "@/types/inventory";
+import type { InventoryEntry, InventorySharedStatus, UpdateState } from "@/types/inventory";
 
 const CONNECTED_SHARED_STATUS: InventorySharedStatus = {
   available: true,
@@ -176,20 +176,7 @@ describe("InventoryShell shell", () => {
 
   it("shows the shared update button and transitions through download states", async () => {
     const user = userEvent.setup();
-    let resolveDownload: (state: {
-      available: boolean;
-      currentVersion: string;
-      latestVersion: string;
-      status: "ready";
-    }) => void = () => undefined;
-    const downloadPromise = new Promise<{
-      available: boolean;
-      currentVersion: string;
-      latestVersion: string;
-      status: "ready";
-    }>((resolve) => {
-      resolveDownload = resolve;
-    });
+    let updateListener: (state: UpdateState) => void = () => undefined;
 
     window.inventoryDesktop = {
       isDesktop: true,
@@ -215,11 +202,25 @@ describe("InventoryShell shell", () => {
       checkForUpdate: vi.fn().mockResolvedValue({
         available: true,
         currentVersion: APP_VERSION,
-        latestVersion: "0.9.7",
+        latestVersion: "0.9.8",
         status: "available",
       }),
-      downloadUpdate: vi.fn().mockReturnValue(downloadPromise),
-      installUpdate: vi.fn().mockResolvedValue(undefined),
+      downloadUpdate: vi.fn().mockResolvedValue({
+        available: true,
+        currentVersion: APP_VERSION,
+        latestVersion: "0.9.8",
+        status: "ready",
+      }),
+      installUpdate: vi.fn().mockResolvedValue({
+        available: true,
+        currentVersion: APP_VERSION,
+        latestVersion: "0.9.8",
+        status: "installing",
+      }),
+      onUpdateStateChanged: vi.fn((callback) => {
+        updateListener = callback;
+        return () => undefined;
+      }),
     };
 
     render(<InventoryShell />);
@@ -229,18 +230,29 @@ describe("InventoryShell shell", () => {
     expect(updateButton.className).toContain("border-sky-500");
     expect(updateButton.className).toContain("text-sky-700");
 
-    await user.click(updateButton);
+    act(() => {
+      updateListener({
+        available: true,
+        currentVersion: APP_VERSION,
+        latestVersion: "0.9.8",
+        status: "downloading",
+      });
+    });
     expect(await screen.findByRole("button", { name: "Downloading update..." })).toBeDisabled();
 
-    resolveDownload({
-      available: true,
-      currentVersion: APP_VERSION,
-      latestVersion: "0.9.7",
-      status: "ready",
+    act(() => {
+      updateListener({
+        available: true,
+        currentVersion: APP_VERSION,
+        latestVersion: "0.9.8",
+        status: "ready",
+      });
     });
 
     await user.click(await screen.findByRole("button", { name: "Install update" }));
     expect(window.inventoryDesktop?.installUpdate).toHaveBeenCalledTimes(1);
+    expect(await screen.findByRole("button", { name: "Starting installer..." })).toBeDisabled();
+    expect(window.inventoryDesktop?.downloadUpdate).not.toHaveBeenCalled();
   });
 
   it("switches to archive view and updates the summary", async () => {

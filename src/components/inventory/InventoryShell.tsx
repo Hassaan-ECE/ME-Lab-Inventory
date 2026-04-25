@@ -218,7 +218,7 @@ export function InventoryShell() {
       .checkForUpdate()
       .then((state) => {
         if (active) {
-          setUpdateState(state);
+          setUpdateState((current) => chooseFreshUpdateState(current, state));
         }
       })
       .catch(() => {
@@ -497,11 +497,17 @@ export function InventoryShell() {
 
     try {
       if (updateState.status === "ready") {
-        await window.inventoryDesktop.installUpdate?.();
+        const nextState = await window.inventoryDesktop.installUpdate?.();
+        if (nextState) {
+          setUpdateState(nextState);
+          if (nextState.status === "error" && nextState.error) {
+            announceStatus(nextState.error);
+          }
+        }
         return;
       }
 
-      if (updateState.status === "downloading" || updateState.status === "checking") {
+      if (updateState.status === "downloading" || updateState.status === "checking" || updateState.status === "installing") {
         return;
       }
 
@@ -514,7 +520,7 @@ export function InventoryShell() {
         setUpdateState((current) => ({ ...current, status: "downloading" }));
       }
       const nextState = await window.inventoryDesktop.downloadUpdate();
-      setUpdateState(nextState);
+      setUpdateState((current) => chooseFreshUpdateState(current, nextState));
       if (nextState.status === "error" && nextState.error) {
         announceStatus(nextState.error);
       }
@@ -799,6 +805,37 @@ function buildIdleUpdateState(): UpdateState {
     currentVersion: APP_VERSION,
     status: "idle",
   };
+}
+
+function chooseFreshUpdateState(current: UpdateState, next: UpdateState): UpdateState {
+  if (current.latestVersion && current.latestVersion === next.latestVersion) {
+    return getUpdateStatusRank(current.status) > getUpdateStatusRank(next.status) ? current : next;
+  }
+
+  return next;
+}
+
+function getUpdateStatusRank(status: UpdateState["status"]): number {
+  switch (status) {
+    case "idle":
+      return 0;
+    case "checking":
+      return 1;
+    case "not-available":
+      return 2;
+    case "available":
+      return 3;
+    case "downloading":
+      return 4;
+    case "ready":
+      return 5;
+    case "installing":
+      return 6;
+    case "error":
+      return 7;
+    default:
+      return 0;
+  }
 }
 
 function sharedStatusesMatch(left: InventorySharedStatus, right: InventorySharedStatus): boolean {

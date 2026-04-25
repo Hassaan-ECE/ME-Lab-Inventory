@@ -3,15 +3,29 @@ import { createHash } from "node:crypto";
 import fs from "node:fs";
 import { promises as fsp } from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { Worker } from "node:worker_threads";
 
 import { resolveSharedRootPath } from "./inventory-runtime.mjs";
 
-const UPDATE_MANIFEST_FILENAME = "current.json";
-const INSTALLER_ARGUMENTS = ["/S"];
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
-export function createSharedUpdater({ currentVersion, executablePath, userDataPath }) {
+const UPDATE_MANIFEST_FILENAME = "current.json";
+const DOWNLOAD_WORKER_PATH = resolveBundledWorkerPath(path.join(__dirname, "update-download-worker.mjs"));
+const INSTALL_HELPER_FILENAME = "install-update.ps1";
+const INSTALL_LOG_FILENAME = "install-update.log";
+
+export function createSharedUpdater({
+  currentVersion,
+  executablePath,
+  userDataPath,
+  downloadInstaller = copyAndVerifyInstaller,
+  launchInstaller = launchInstallerAndRelaunch,
+} = {}) {
   let manifest = null;
   let downloadedInstallerPath = "";
+  let downloadPromise = null;
   let state = buildBaseState("idle", currentVersion);
   const listeners = new Set();
 
@@ -23,75 +37,151 @@ export function createSharedUpdater({ currentVersion, executablePath, userDataPa
     return state;
   }
 
+  async function checkForUpdate({ autoDownload = true } = {}) {
+    emit(buildBaseState("checking", currentVersion));
+
+    try {
+      const result = await readSharedUpdateManifest(currentVersion);
+      manifest = result.manifest;
+      downloadedInstallerPath = "";
+
+      if (!result.updateAvailable) {
+        return emit({
+          ...buildBaseState("not-available", currentVersion),
+          latestVersion: manifest?.version,
+        });
+      }
+
+      const availableState = emit(buildAvailableState(currentVersion, manifest));
+      if (autoDownload) {
+        queueMicrotask(() => {
+          void startDownloadFromManifest();
+        });
+      }
+      return availableState;
+    } catch (error) {
+      manifest = null;
+      downloadedInstallerPath = "";
+      return emit(buildErrorState(currentVersion, error));
+    }
+  }
+
+  async function startDownloadFromManifest() {
+    if (downloadPromise) {
+      return downloadPromise;
+    }
+    if (!manifest || compareVersions(manifest.version, currentVersion) <= 0) {
+      return state;
+    }
+
+    if (downloadedInstallerPath && fs.existsSync(downloadedInstallerPath)) {
+      if (await installerMatchesExpectedHash(downloadedInstallerPath, manifest.sha256)) {
+        return emit({
+          ...buildAvailableState(currentVersion, manifest),
+          downloadPhase: "ready",
+          downloadProgress: 1,
+          downloadedInstallerPath,
+          status: "ready",
+        });
+      }
+      downloadedInstallerPath = "";
+    }
+
+    downloadPromise = runDownloadFromManifest().finally(() => {
+      downloadPromise = null;
+    });
+    return downloadPromise;
+  }
+
+  async function runDownloadFromManifest() {
+    try {
+      emit({
+        ...buildAvailableState(currentVersion, manifest),
+        downloadPhase: "copying",
+        downloadProgress: 0,
+        status: "downloading",
+      });
+
+      const installerPath = await downloadInstaller({
+        currentVersion,
+        manifest,
+        onProgress: ({ phase, progress }) => {
+          emit({
+            ...buildAvailableState(currentVersion, manifest),
+            downloadPhase: phase,
+            downloadProgress: progress,
+            status: "downloading",
+          });
+        },
+        userDataPath,
+      });
+      downloadedInstallerPath = installerPath;
+
+      return emit({
+        ...buildAvailableState(currentVersion, manifest),
+        downloadPhase: "ready",
+        downloadProgress: 1,
+        downloadedInstallerPath,
+        status: "ready",
+      });
+    } catch (error) {
+      downloadedInstallerPath = "";
+      return emit(buildErrorState(currentVersion, error, manifest));
+    }
+  }
+
   return {
     getState: () => state,
     onStateChanged(listener) {
       listeners.add(listener);
       return () => listeners.delete(listener);
     },
-    async checkForUpdate() {
-      emit(buildBaseState("checking", currentVersion));
-
-      try {
-        const result = await readSharedUpdateManifest(currentVersion);
-        manifest = result.manifest;
-        downloadedInstallerPath = "";
-
-        if (!result.updateAvailable) {
-          return emit({
-            ...buildBaseState("not-available", currentVersion),
-            latestVersion: manifest?.version,
-          });
-        }
-
-        return emit(buildAvailableState(currentVersion, manifest));
-      } catch (error) {
-        manifest = null;
-        downloadedInstallerPath = "";
-        return emit(buildErrorState(currentVersion, error));
-      }
-    },
+    checkForUpdate,
     async downloadUpdate() {
+      if (!manifest || compareVersions(manifest.version, currentVersion) <= 0) {
+        const checkedState = await checkForUpdate({ autoDownload: false });
+        if (!checkedState.available || !manifest) {
+          return checkedState;
+        }
+      }
+
+      return startDownloadFromManifest();
+    },
+    async installUpdate() {
       try {
+        if (downloadPromise) {
+          await downloadPromise;
+        }
         if (!manifest || compareVersions(manifest.version, currentVersion) <= 0) {
-          const checkedState = await this.checkForUpdate();
-          if (!checkedState.available || !manifest) {
-            return checkedState;
-          }
+          throw new Error("No newer update is available to install.");
+        }
+        if (!downloadedInstallerPath || !fs.existsSync(downloadedInstallerPath)) {
+          throw new Error("The update installer has not been downloaded yet.");
+        }
+        if (!(await installerMatchesExpectedHash(downloadedInstallerPath, manifest.sha256))) {
+          downloadedInstallerPath = "";
+          throw new Error("The downloaded update no longer matches the expected checksum.");
         }
 
-        emit({
-          ...buildAvailableState(currentVersion, manifest),
-          status: "downloading",
-        });
-
-        const installerPath = await copyAndVerifyInstaller({
-          currentVersion,
-          manifest,
+        const handoff = await launchInstaller({
+          executablePath,
+          installerPath: downloadedInstallerPath,
+          parentPid: process.pid,
           userDataPath,
+          version: manifest.version,
         });
-        downloadedInstallerPath = installerPath;
 
         return emit({
           ...buildAvailableState(currentVersion, manifest),
+          downloadPhase: "ready",
+          downloadProgress: 1,
           downloadedInstallerPath,
-          status: "ready",
+          installLogPath: handoff.logPath,
+          status: "installing",
         });
       } catch (error) {
-        downloadedInstallerPath = "";
         return emit(buildErrorState(currentVersion, error, manifest));
       }
-    },
-    installUpdate() {
-      if (!downloadedInstallerPath || !fs.existsSync(downloadedInstallerPath)) {
-        throw new Error("The update installer has not been downloaded yet.");
-      }
-
-      launchInstallerAndRelaunch({
-        executablePath,
-        installerPath: downloadedInstallerPath,
-        parentPid: process.pid,
-      });
     },
   };
 }
@@ -148,29 +238,180 @@ export function resolveManifestInstallerPath(installerPath, sharedRootPath) {
   return candidatePath;
 }
 
-export function launchInstallerAndRelaunch({ executablePath, installerPath, parentPid }) {
-  const command = [
-    "$ErrorActionPreference = 'SilentlyContinue'",
+export async function copyAndVerifyInstaller({
+  manifest,
+  onProgress,
+  userDataPath,
+  workerPath = DOWNLOAD_WORKER_PATH,
+}) {
+  if (!fs.existsSync(manifest.installerPath)) {
+    throw new Error("Update installer could not be found on the shared drive.");
+  }
+
+  const downloadDirectory = path.join(userDataPath, "updates", manifest.version);
+  const outputPath = path.join(downloadDirectory, path.basename(manifest.installerPath));
+
+  return runDownloadWorker({
+    expectedHash: manifest.sha256,
+    onProgress,
+    outputPath,
+    sourcePath: manifest.installerPath,
+    workerPath,
+  });
+}
+
+export async function launchInstallerAndRelaunch({
+  executablePath,
+  installerPath,
+  parentPid,
+  userDataPath,
+  version,
+  spawnProcess = spawn,
+}) {
+  const handoff = await writeInstallHelperScript({
+    executablePath,
+    installerPath,
+    parentPid,
+    userDataPath,
+    version,
+  });
+  await spawnPowerShellHelper(handoff.scriptPath, spawnProcess);
+  return handoff;
+}
+
+export async function writeInstallHelperScript({ executablePath, installerPath, parentPid, userDataPath, version }) {
+  const helperDirectory = path.join(userDataPath, "updates", normalizeFileSegment(version) || "pending");
+  const scriptPath = path.join(helperDirectory, INSTALL_HELPER_FILENAME);
+  const logPath = path.join(helperDirectory, INSTALL_LOG_FILENAME);
+  await fsp.mkdir(helperDirectory, { recursive: true });
+  await fsp.writeFile(
+    scriptPath,
+    buildInstallHelperScript({ executablePath, installerPath, logPath, parentPid }),
+    "utf8",
+  );
+
+  return { logPath, scriptPath };
+}
+
+export function buildInstallHelperScript({ executablePath, installerPath, logPath, parentPid }) {
+  return [
+    "$ErrorActionPreference = 'Stop'",
     `$parentPid = ${Number(parentPid)}`,
     `$installer = ${toPowerShellString(installerPath)}`,
     `$app = ${toPowerShellString(executablePath)}`,
-    "Wait-Process -Id $parentPid -ErrorAction SilentlyContinue",
-    `$process = Start-Process -FilePath $installer -ArgumentList ${toPowerShellString(INSTALLER_ARGUMENTS.join(" "))} -PassThru`,
-    "if ($process) { Wait-Process -Id $process.Id -ErrorAction SilentlyContinue }",
-    "Start-Sleep -Seconds 1",
-    "Start-Process -FilePath $app",
-  ].join("; ");
+    `$log = ${toPowerShellString(logPath)}`,
+    "New-Item -ItemType Directory -Force -Path (Split-Path -Parent $log) | Out-Null",
+    "function Write-InstallLog { param([string]$Message) Add-Content -LiteralPath $log -Value ((Get-Date -Format o) + ' ' + $Message) }",
+    "function Get-AppProcessCount { @((Get-Process -ErrorAction SilentlyContinue) | Where-Object { try { $_.Path -eq $app -and $_.Id -ne $PID } catch { $false } }).Count }",
+    "try {",
+    "  Write-InstallLog 'Helper started.'",
+    "  Write-InstallLog ('Waiting for app process {0} to exit.' -f $parentPid)",
+    "  Wait-Process -Id $parentPid -ErrorAction SilentlyContinue",
+    "  for ($attempt = 0; $attempt -lt 120; $attempt++) {",
+    "    if ((Get-AppProcessCount) -eq 0) { break }",
+    "    Start-Sleep -Milliseconds 250",
+    "  }",
+    "  if (!(Test-Path -LiteralPath $installer)) { throw ('Installer missing: {0}' -f $installer) }",
+    "  Write-InstallLog 'Launching visible installer.'",
+    "  $installerProcess = Start-Process -FilePath $installer -PassThru",
+    "  if ($null -eq $installerProcess) { throw 'Installer process did not start.' }",
+    "  Write-InstallLog ('Installer started with PID {0}.' -f $installerProcess.Id)",
+    "  Wait-Process -Id $installerProcess.Id -ErrorAction SilentlyContinue",
+    "  Write-InstallLog 'Installer finished.'",
+    "  Start-Sleep -Seconds 1",
+    "  if (Test-Path -LiteralPath $app) {",
+    "    Start-Process -FilePath $app",
+    "    Write-InstallLog 'Relaunched app.'",
+    "  } else {",
+    "    Write-InstallLog ('Installed app executable was not found for relaunch: {0}' -f $app)",
+    "  }",
+    "} catch {",
+    "  Write-InstallLog ('ERROR: {0}' -f $_.Exception.Message)",
+    "  exit 1",
+    "}",
+    "",
+  ].join("\r\n");
+}
 
-  const child = spawn(
-    "powershell.exe",
-    ["-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-Command", command],
-    {
-      detached: true,
-      stdio: "ignore",
-      windowsHide: true,
-    },
-  );
-  child.unref();
+function runDownloadWorker({ expectedHash, onProgress, outputPath, sourcePath, workerPath }) {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const worker = new Worker(workerPath, {
+      workerData: {
+        expectedHash,
+        outputPath,
+        sourcePath,
+      },
+    });
+
+    worker.on("message", (message) => {
+      if (message?.type === "progress") {
+        onProgress?.({
+          phase: normalizeDownloadPhase(message.phase),
+          progress: Math.max(0, Math.min(1, Number(message.progress) || 0)),
+        });
+        return;
+      }
+      if (message?.type === "done") {
+        settled = true;
+        resolve(String(message.outputPath ?? outputPath));
+        return;
+      }
+      if (message?.type === "error") {
+        settled = true;
+        reject(new Error(String(message.error || "Update download failed.")));
+      }
+    });
+    worker.on("error", (error) => {
+      if (!settled) {
+        settled = true;
+        reject(error);
+      }
+    });
+    worker.on("exit", (code) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      reject(new Error(code === 0 ? "Update download worker exited before finishing." : `Update download worker exited with code ${code}.`));
+    });
+  });
+}
+
+function spawnPowerShellHelper(scriptPath, spawnProcess) {
+  return new Promise((resolve, reject) => {
+    let child;
+    let settled = false;
+
+    try {
+      child = spawnProcess(
+        "powershell.exe",
+        ["-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", scriptPath],
+        {
+          detached: true,
+          stdio: "ignore",
+          windowsHide: true,
+        },
+      );
+    } catch (error) {
+      reject(error);
+      return;
+    }
+
+    child.once("error", (error) => {
+      if (!settled) {
+        settled = true;
+        reject(error);
+      }
+    });
+    child.once("spawn", () => {
+      if (!settled) {
+        settled = true;
+        child.unref();
+        resolve();
+      }
+    });
+  });
 }
 
 function buildBaseState(status, currentVersion) {
@@ -181,13 +422,13 @@ function buildBaseState(status, currentVersion) {
   };
 }
 
-function buildAvailableState(currentVersion, manifest) {
+function buildAvailableState(currentVersion, currentManifest) {
   return {
     available: true,
     currentVersion,
-    latestVersion: manifest.version,
-    notes: manifest.notes,
-    publishedAt: manifest.publishedAt,
+    latestVersion: currentManifest.version,
+    notes: currentManifest.notes,
+    publishedAt: currentManifest.publishedAt,
     status: "available",
   };
 }
@@ -225,28 +466,6 @@ function normalizeManifest(rawManifest, manifestPath, sharedRootPath) {
   };
 }
 
-async function copyAndVerifyInstaller({ currentVersion, manifest, userDataPath }) {
-  if (!fs.existsSync(manifest.installerPath)) {
-    throw new Error("Update installer could not be found on the shared drive.");
-  }
-
-  const downloadDirectory = path.join(userDataPath, "updates", manifest.version);
-  const outputPath = path.join(downloadDirectory, path.basename(manifest.installerPath));
-  await fsp.mkdir(downloadDirectory, { recursive: true });
-
-  if (fs.existsSync(outputPath) && (await installerMatchesExpectedHash(outputPath, manifest.sha256))) {
-    return outputPath;
-  }
-
-  await fsp.copyFile(manifest.installerPath, outputPath);
-  if (!(await installerMatchesExpectedHash(outputPath, manifest.sha256))) {
-    await fsp.rm(outputPath, { force: true });
-    throw new Error(`Downloaded update ${manifest.version} did not match the expected checksum for ${currentVersion}.`);
-  }
-
-  return outputPath;
-}
-
 async function installerMatchesExpectedHash(installerPath, expectedHash) {
   if (!expectedHash) {
     return true;
@@ -271,6 +490,24 @@ function parseVersion(value) {
     .split(/[.-]/)
     .map((part) => Number.parseInt(part, 10))
     .map((part) => (Number.isFinite(part) && part >= 0 ? part : 0));
+}
+
+function normalizeDownloadPhase(value) {
+  return ["copying", "ready", "verifying"].includes(value) ? value : "copying";
+}
+
+function resolveBundledWorkerPath(workerPath) {
+  const asarSegment = `${path.sep}app.asar${path.sep}`;
+  if (!workerPath.includes(asarSegment)) {
+    return workerPath;
+  }
+
+  const unpackedWorkerPath = workerPath.replace(asarSegment, `${path.sep}app.asar.unpacked${path.sep}`);
+  return fs.existsSync(unpackedWorkerPath) ? unpackedWorkerPath : workerPath;
+}
+
+function normalizeFileSegment(value) {
+  return String(value ?? "").replace(/[^a-zA-Z0-9._-]/g, "_");
 }
 
 function normalizeManifestText(value) {

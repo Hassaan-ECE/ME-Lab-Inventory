@@ -28,7 +28,7 @@ declare global {
       }>;
       checkForUpdate?: () => Promise<UpdateState>;
       downloadUpdate?: () => Promise<UpdateState>;
-      installUpdate?: () => Promise<void>;
+      installUpdate?: () => Promise<UpdateState>;
       onSharedInventoryChanged?: (callback: () => void) => () => void;
       onUpdateStateChanged?: (callback: (state: UpdateState) => void) => () => void;
     };

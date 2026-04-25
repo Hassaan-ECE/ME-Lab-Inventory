@@ -180,7 +180,7 @@ function UpdateActionButton({ state, onClick }: UpdateActionButtonProps) {
   return (
     <button
       className="ml-1 inline-flex h-7 shrink-0 items-center justify-center rounded-lg border border-sky-500 bg-sky-100 px-2.5 text-xs font-semibold text-sky-700 transition-colors hover:bg-sky-200 disabled:cursor-default disabled:opacity-80 dark:border-sky-400/70 dark:bg-sky-950/50 dark:text-sky-200 dark:hover:bg-sky-900/70"
-      disabled={state.status === "downloading" || state.status === "checking"}
+      disabled={state.status === "downloading" || state.status === "checking" || state.status === "installing"}
       type="button"
       onClick={onClick}
     >
@@ -197,6 +197,8 @@ function getUpdateActionLabel(state: UpdateState): string {
       return "Downloading update...";
     case "ready":
       return "Install update";
+    case "installing":
+      return "Starting installer...";
     case "error":
       return "Retry update";
     default:

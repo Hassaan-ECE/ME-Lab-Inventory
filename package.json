@@ -1,7 +1,7 @@
 {
   "name": "me-inventory",
   "private": true,
-  "version": "0.9.6",
+  "version": "0.9.7",
   "description": "Standalone ME Inventory desktop app with a shared SQLite-backed workflow.",
   "author": "Syed Hassaan Shah",
   "type": "module",
@@ -66,6 +66,9 @@
         "to": "data"
       }
     ],
+    "asarUnpack": [
+      "electron/update-download-worker.mjs"
+    ],
     "files": [
       "dist/**/*",
       "electron/**/*",
@@ -86,7 +89,8 @@
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
-      "perMachine": false
+      "perMachine": false,
+      "runAfterFinish": false
     }
   }
 }
