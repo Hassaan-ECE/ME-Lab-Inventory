@@ -203,13 +203,7 @@ app.whenReady().then(() => {
   );
   ipcMain.handle("inventory:update:check", () => getSharedUpdater().checkForUpdate());
   ipcMain.handle("inventory:update:download", () => getSharedUpdater().downloadUpdate());
-  ipcMain.handle("inventory:update:install", async () => {
-    const state = await getSharedUpdater().installUpdate();
-    if (state.status === "installing") {
-      setTimeout(() => app.quit(), 250);
-    }
-    return state;
-  });
+  ipcMain.handle("inventory:update:install", () => getSharedUpdater().installUpdate());
 
   createMainWindow();
 

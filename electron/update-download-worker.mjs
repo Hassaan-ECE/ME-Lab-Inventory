@@ -5,7 +5,8 @@ import path from "node:path";
 import { pipeline } from "node:stream/promises";
 import { parentPort, workerData } from "node:worker_threads";
 
-const PROGRESS_INTERVAL_MS = 150;
+const PROGRESS_INTERVAL_MS = 500;
+const PROGRESS_INCREMENT = 0.01;
 
 run()
   .then((result) => {
@@ -32,8 +33,9 @@ async function run() {
 
   await fsp.mkdir(path.dirname(outputPath), { recursive: true });
   if (fs.existsSync(outputPath) && (await installerMatchesExpectedHash(outputPath, expectedHash))) {
+    const outputStats = await fsp.stat(outputPath);
     postProgress("ready", 1);
-    return { outputPath, reused: true };
+    return buildDownloadResult({ expectedHash, outputPath, outputStats, reused: true });
   }
 
   const tempPath = `${outputPath}.partial`;
@@ -49,7 +51,12 @@ async function run() {
   }
 
   postProgress("ready", 1);
-  return { outputPath, reused: false };
+  return buildDownloadResult({
+    expectedHash,
+    outputPath,
+    outputStats: await fsp.stat(outputPath),
+    reused: false,
+  });
 }
 
 async function copyInstallerToTempFile({ expectedHash, sourcePath, tempPath }) {
@@ -58,6 +65,7 @@ async function copyInstallerToTempFile({ expectedHash, sourcePath, tempPath }) {
   const hash = expectedHash ? createHash("sha256") : null;
   let copiedBytes = 0;
   let lastProgressAt = 0;
+  let lastProgress = 0;
 
   postProgress("copying", 0);
 
@@ -67,9 +75,14 @@ async function copyInstallerToTempFile({ expectedHash, sourcePath, tempPath }) {
     hash?.update(chunk);
 
     const now = Date.now();
-    if (now - lastProgressAt >= PROGRESS_INTERVAL_MS || copiedBytes === totalBytes) {
+    const progress = totalBytes > 0 ? copiedBytes / totalBytes : 1;
+    if (
+      (now - lastProgressAt >= PROGRESS_INTERVAL_MS && progress - lastProgress >= PROGRESS_INCREMENT) ||
+      copiedBytes === totalBytes
+    ) {
       lastProgressAt = now;
-      postProgress("copying", totalBytes > 0 ? copiedBytes / totalBytes : 1);
+      lastProgress = progress;
+      postProgress("copying", progress);
     }
   });
 
@@ -84,6 +97,16 @@ async function copyInstallerToTempFile({ expectedHash, sourcePath, tempPath }) {
   if (actualHash !== expectedHash) {
     throw new Error("Downloaded update did not match the expected checksum.");
   }
+}
+
+function buildDownloadResult({ expectedHash, outputPath, outputStats, reused }) {
+  return {
+    mtimeMs: outputStats.mtimeMs,
+    outputPath,
+    reused,
+    sha256: expectedHash,
+    size: outputStats.size,
+  };
 }
 
 async function installerMatchesExpectedHash(installerPath, expectedHash) {
