@@ -202,19 +202,19 @@ describe("InventoryShell shell", () => {
       checkForUpdate: vi.fn().mockResolvedValue({
         available: true,
         currentVersion: APP_VERSION,
-        latestVersion: "0.9.9",
+        latestVersion: "0.9.6",
         status: "available",
       }),
       downloadUpdate: vi.fn().mockResolvedValue({
         available: true,
         currentVersion: APP_VERSION,
-        latestVersion: "0.9.9",
+        latestVersion: "0.9.6",
         status: "ready",
       }),
       installUpdate: vi.fn().mockResolvedValue({
         available: true,
         currentVersion: APP_VERSION,
-        latestVersion: "0.9.9",
+        latestVersion: "0.9.6",
         status: "installing",
       }),
       onUpdateStateChanged: vi.fn((callback) => {
@@ -234,7 +234,7 @@ describe("InventoryShell shell", () => {
       updateListener({
         available: true,
         currentVersion: APP_VERSION,
-        latestVersion: "0.9.9",
+        latestVersion: "0.9.6",
         status: "downloading",
       });
     });
@@ -244,14 +244,14 @@ describe("InventoryShell shell", () => {
       updateListener({
         available: true,
         currentVersion: APP_VERSION,
-        latestVersion: "0.9.9",
+        latestVersion: "0.9.6",
         status: "ready",
       });
     });
 
     await user.click(await screen.findByRole("button", { name: "Install update" }));
     expect(window.inventoryDesktop?.installUpdate).toHaveBeenCalledTimes(1);
-    expect(await screen.findByRole("button", { name: "Starting installer..." })).toBeDisabled();
+    expect(await screen.findByRole("button", { name: "Installer opened" })).toBeDisabled();
     expect(window.inventoryDesktop?.downloadUpdate).not.toHaveBeenCalled();
   });
 

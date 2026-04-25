@@ -83,6 +83,7 @@ export interface UpdateState {
   downloadedInstallerPath?: string;
   error?: string;
   installLogPath?: string;
+  installerPid?: number;
   latestVersion?: string;
   notes?: string;
   publishedAt?: string;

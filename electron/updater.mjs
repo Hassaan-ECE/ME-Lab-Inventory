@@ -12,15 +12,12 @@ const __dirname = path.dirname(__filename);
 
 const UPDATE_MANIFEST_FILENAME = "current.json";
 const DOWNLOAD_WORKER_PATH = resolveBundledWorkerPath(path.join(__dirname, "update-download-worker.mjs"));
-const INSTALL_HELPER_FILENAME = "install-update.ps1";
-const INSTALL_LOG_FILENAME = "install-update.log";
 
 export function createSharedUpdater({
   currentVersion,
-  executablePath,
   userDataPath,
   downloadInstaller = copyAndVerifyInstaller,
-  launchInstaller = launchInstallerAndRelaunch,
+  launchInstaller = launchVisibleInstaller,
 } = {}) {
   let manifest = null;
   let downloadedInstallerPath = "";
@@ -165,11 +162,7 @@ export function createSharedUpdater({
         }
 
         const handoff = await launchInstaller({
-          executablePath,
           installerPath: downloadedInstaller.path,
-          parentPid: process.pid,
-          userDataPath,
-          version: manifest.version,
         });
 
         return emit({
@@ -177,7 +170,7 @@ export function createSharedUpdater({
           downloadPhase: "ready",
           downloadProgress: 1,
           downloadedInstallerPath,
-          installLogPath: handoff.logPath,
+          installerPid: handoff.installerPid,
           status: "installing",
         });
       } catch (error) {
@@ -267,75 +260,41 @@ export async function copyAndVerifyInstaller({
   };
 }
 
-export async function launchInstallerAndRelaunch({
-  executablePath,
-  installerPath,
-  parentPid,
-  userDataPath,
-  version,
-  spawnProcess = spawn,
-}) {
-  const handoff = await writeInstallHelperScript({
-    executablePath,
-    installerPath,
-    parentPid,
-    userDataPath,
-    version,
+export function launchVisibleInstaller({ installerPath, spawnProcess = spawn } = {}) {
+  return new Promise((resolve, reject) => {
+    if (!installerPath || !fs.existsSync(installerPath)) {
+      reject(new Error("The update installer could not be found."));
+      return;
+    }
+
+    let child;
+    let settled = false;
+
+    try {
+      child = spawnProcess(installerPath, [], {
+        detached: true,
+        stdio: "ignore",
+        windowsHide: false,
+      });
+    } catch (error) {
+      reject(error);
+      return;
+    }
+
+    child.once("error", (error) => {
+      if (!settled) {
+        settled = true;
+        reject(error);
+      }
+    });
+    child.once("spawn", () => {
+      if (!settled) {
+        settled = true;
+        child.unref?.();
+        resolve({ installerPath, installerPid: child.pid });
+      }
+    });
   });
-  await spawnPowerShellHelper(handoff.scriptPath, spawnProcess);
-  return handoff;
-}
-
-export async function writeInstallHelperScript({ executablePath, installerPath, parentPid, userDataPath, version }) {
-  const helperDirectory = path.join(userDataPath, "updates", normalizeFileSegment(version) || "pending");
-  const scriptPath = path.join(helperDirectory, INSTALL_HELPER_FILENAME);
-  const logPath = path.join(helperDirectory, INSTALL_LOG_FILENAME);
-  await fsp.mkdir(helperDirectory, { recursive: true });
-  await fsp.writeFile(
-    scriptPath,
-    buildInstallHelperScript({ executablePath, installerPath, logPath, parentPid }),
-    "utf8",
-  );
-
-  return { logPath, scriptPath };
-}
-
-export function buildInstallHelperScript({ executablePath, installerPath, logPath, parentPid }) {
-  return [
-    "$ErrorActionPreference = 'Stop'",
-    `$parentPid = ${Number(parentPid)}`,
-    `$installer = ${toPowerShellString(installerPath)}`,
-    `$app = ${toPowerShellString(executablePath)}`,
-    `$log = ${toPowerShellString(logPath)}`,
-    "New-Item -ItemType Directory -Force -Path (Split-Path -Parent $log) | Out-Null",
-    "function Write-InstallLog { param([string]$Message) Add-Content -LiteralPath $log -Value ((Get-Date -Format o) + ' ' + $Message) }",
-    "function Get-AppProcessCount { @((Get-Process -ErrorAction SilentlyContinue) | Where-Object { try { $_.Path -eq $app -and $_.Id -ne $PID } catch { $false } }).Count }",
-    "try {",
-    "  Write-InstallLog 'Helper started.'",
-    "  Write-InstallLog ('Install requested by app process {0}.' -f $parentPid)",
-    "  if (!(Test-Path -LiteralPath $installer)) { throw ('Installer missing: {0}' -f $installer) }",
-    "  Write-InstallLog 'Launching visible installer.'",
-    "  $installerProcess = Start-Process -FilePath $installer -PassThru",
-    "  if ($null -eq $installerProcess) { throw 'Installer process did not start.' }",
-    "  Write-InstallLog ('Installer started with PID {0}.' -f $installerProcess.Id)",
-    "  Wait-Process -Id $installerProcess.Id -ErrorAction SilentlyContinue",
-    "  Write-InstallLog 'Installer finished.'",
-    "  Start-Sleep -Seconds 1",
-    "  $appProcessCount = Get-AppProcessCount",
-    "  if ($appProcessCount -eq 0 -and (Test-Path -LiteralPath $app)) {",
-    "    Start-Process -FilePath $app",
-    "    Write-InstallLog 'Relaunched app.'",
-    "  } elseif ($appProcessCount -gt 0) {",
-    "    Write-InstallLog 'App is already running; relaunch skipped.'",
-    "  } else {",
-    "    Write-InstallLog ('Installed app executable was not found for relaunch: {0}' -f $app)",
-    "  }",
-    "} catch {",
-    "  Write-InstallLog ('ERROR: {0}' -f $_.Exception.Message)",
-    "  exit 1",
-    "}",
-    "",
-  ].join("\r\n");
 }
 
 function runDownloadWorker({ expectedHash, onProgress, outputPath, sourcePath, workerPath }) {
@@ -385,42 +344,6 @@ function runDownloadWorker({ expectedHash, onProgress, outputPath, sourcePath, w
       }
       settled = true;
       reject(new Error(code === 0 ? "Update download worker exited before finishing." : `Update download worker exited with code ${code}.`));
-    });
-  });
-}
-
-function spawnPowerShellHelper(scriptPath, spawnProcess) {
-  return new Promise((resolve, reject) => {
-    let child;
-    let settled = false;
-
-    try {
-      child = spawnProcess(
-        "powershell.exe",
-        ["-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", scriptPath],
-        {
-          detached: true,
-          stdio: "ignore",
-          windowsHide: true,
-        },
-      );
-    } catch (error) {
-      reject(error);
-      return;
-    }
-
-    child.once("error", (error) => {
-      if (!settled) {
-        settled = true;
-        reject(error);
-      }
-    });
-    child.once("spawn", () => {
-      if (!settled) {
-        settled = true;
-        child.unref();
-        resolve();
-      }
     });
   });
 }
@@ -536,14 +459,6 @@ function resolveBundledWorkerPath(workerPath) {
   return fs.existsSync(unpackedWorkerPath) ? unpackedWorkerPath : workerPath;
 }
 
-function normalizeFileSegment(value) {
-  return String(value ?? "").replace(/[^a-zA-Z0-9._-]/g, "_");
-}
-
 function normalizeManifestText(value) {
   return typeof value === "string" ? value.trim() : "";
-}
-
-function toPowerShellString(value) {
-  return `'${String(value).replaceAll("'", "''")}'`;
 }

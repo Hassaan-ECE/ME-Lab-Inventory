@@ -198,7 +198,7 @@ function getUpdateActionLabel(state: UpdateState): string {
     case "ready":
       return "Install update";
     case "installing":
-      return "Starting installer...";
+      return "Installer opened";
     case "error":
       return "Retry update";
     default:
