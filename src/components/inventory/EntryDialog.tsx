@@ -71,7 +71,6 @@ export function EntryDialog({ defaultArchived = false, mode, onClose, onSave, re
   });
   const canBrowsePicture = Boolean(window.inventoryDesktop?.pickPicturePath);
   const canOpenPicture = Boolean(picturePath) && picturePreviewState === "loaded";
-  const showPictureField = !readOnly || Boolean(picturePath);
   const showInlinePicturePreview = (!showsSidebarActions && !readOnly) || (!showsSidebarActions && Boolean(picturePath));
   const showSidebarPicturePreview = showsSidebarActions && (!readOnly || Boolean(picturePath));
 
@@ -263,31 +262,6 @@ export function EntryDialog({ defaultArchived = false, mode, onClose, onSave, re
                   />
                 </Field>
 
-                {showPictureField ? (
-                  <Field className="lg:col-span-2" label="Picture Path">
-                    <div className="flex flex-col gap-2 sm:flex-row">
-                      <Input
-                        className="min-w-0 flex-1"
-                        placeholder="Select or paste a local image path"
-                        value={form.picturePath}
-                        onChange={(event) => updateForm(setForm, "picturePath", event.currentTarget.value)}
-                      />
-                      <Button
-                        disabled={!canBrowsePicture}
-                        size="sm"
-                        title={canBrowsePicture ? "Browse for an entry picture" : "Desktop file picker unavailable"}
-                        variant="outline"
-                        onClick={() => {
-                          void handleBrowsePicture();
-                        }}
-                      >
-                        <FolderOpenIcon className="size-3.5" />
-                        Browse
-                      </Button>
-                    </div>
-                  </Field>
-                ) : null}
-
                 <Field label="Lifecycle">
                   <select
                     className={SELECT_CLASS}
@@ -331,11 +305,15 @@ export function EntryDialog({ defaultArchived = false, mode, onClose, onSave, re
                 {showInlinePicturePreview ? (
                   <div className="lg:col-span-2">
                     <PicturePreviewCard
+                      canBrowse={canBrowsePicture}
                       canOpen={canOpenPicture}
                       compact={false}
                       picturePath={picturePath}
                       previewSrc={picturePreviewSrc}
                       previewState={picturePreviewState}
+                      onBrowse={() => {
+                        void handleBrowsePicture();
+                      }}
                       onOpen={() => {
                         void handleOpenPicture();
                       }}
@@ -403,11 +381,15 @@ export function EntryDialog({ defaultArchived = false, mode, onClose, onSave, re
             <div className="min-h-0 flex-1 overflow-y-auto pr-1">
               {showSidebarPicturePreview ? (
                 <PicturePreviewCard
+                  canBrowse={canBrowsePicture}
                   canOpen={canOpenPicture}
                   compact
                   picturePath={picturePath}
                   previewSrc={picturePreviewSrc}
                   previewState={picturePreviewState}
+                  onBrowse={() => {
+                    void handleBrowsePicture();
+                  }}
                   onOpen={() => {
                     void handleOpenPicture();
                   }}
@@ -475,22 +457,26 @@ function Field({ children, className, label }: FieldProps) {
 }
 
 interface PicturePreviewCardProps {
+  canBrowse: boolean;
   canOpen: boolean;
   compact?: boolean;
   picturePath: string;
   previewSrc: string | null;
   previewState: PicturePreviewState;
+  onBrowse: () => void;
   onOpen: () => void;
   onPreviewError: () => void;
   onPreviewLoad: () => void;
 }
 
 function PicturePreviewCard({
+  canBrowse,
   canOpen,
   compact = false,
   picturePath,
   previewSrc,
   previewState,
+  onBrowse,
   onOpen,
   onPreviewError,
   onPreviewLoad,
@@ -507,11 +493,23 @@ function PicturePreviewCard({
             {!hasPicture ? "No picture selected" : previewState === "missing" ? "Picture not found" : "Selected image"}
           </p>
         </div>
-        {hasPicture ? (
-          <Badge variant={previewState === "loaded" ? "success" : previewState === "missing" ? "warning" : "outline"}>
-            {previewState === "loaded" ? "Ready" : previewState === "missing" ? "Missing" : "Selected"}
-          </Badge>
-        ) : null}
+        <div className="flex shrink-0 items-center gap-2">
+          {hasPicture ? (
+            <Badge variant={previewState === "loaded" ? "success" : previewState === "missing" ? "warning" : "outline"}>
+              {previewState === "loaded" ? "Ready" : previewState === "missing" ? "Missing" : "Selected"}
+            </Badge>
+          ) : null}
+          <Button
+            disabled={!canBrowse}
+            size="sm"
+            title={canBrowse ? "Browse for an entry picture" : "Desktop file picker unavailable"}
+            variant="outline"
+            onClick={onBrowse}
+          >
+            <FolderOpenIcon className="size-3.5" />
+            Browse
+          </Button>
+        </div>
       </div>
 
       <div

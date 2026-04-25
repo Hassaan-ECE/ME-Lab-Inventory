@@ -34,7 +34,7 @@ describe("EntryDialog", () => {
     mockMatchMedia(false);
   });
 
-  it("prepopulates the picture path and saves it with the entry input", async () => {
+  it("shows the picture path in the preview and saves it with the entry input", async () => {
     const user = userEvent.setup();
     const onSave = vi.fn().mockResolvedValue(undefined) as unknown as (_: InventoryEntryInput) => Promise<void>;
 
@@ -47,16 +47,14 @@ describe("EntryDialog", () => {
       />,
     );
 
-    const picturePathInput = screen.getByLabelText("Picture Path");
-    expect(picturePathInput).toHaveValue("C:\\Pictures\\fixture-plate.jpg");
+    expect(screen.queryByLabelText("Picture Path")).not.toBeInTheDocument();
+    expect(screen.getByText("C:\\Pictures\\fixture-plate.jpg")).toBeInTheDocument();
 
-    await user.clear(picturePathInput);
-    await user.type(picturePathInput, "C:\\Pictures\\fixture-plate-updated.jpg");
     await user.click(screen.getByRole("button", { name: "Save Entry" }));
 
     expect(onSave).toHaveBeenCalledWith(
       expect.objectContaining({
-        picturePath: "C:\\Pictures\\fixture-plate-updated.jpg",
+        picturePath: "C:\\Pictures\\fixture-plate.jpg",
       }),
     );
   });
@@ -79,7 +77,8 @@ describe("EntryDialog", () => {
     await user.click(screen.getByRole("button", { name: "Browse" }));
 
     expect(pickPicturePath).toHaveBeenCalledTimes(1);
-    expect(screen.getByLabelText("Picture Path")).toHaveValue("C:\\Pictures\\selected-image.jpg");
+    expect(screen.queryByLabelText("Picture Path")).not.toBeInTheDocument();
+    expect(screen.getByText("C:\\Pictures\\selected-image.jpg")).toBeInTheDocument();
   });
 
   it("opens the picture in the desktop viewer from the large-screen preview", async () => {
