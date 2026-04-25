@@ -202,19 +202,19 @@ describe("InventoryShell shell", () => {
       checkForUpdate: vi.fn().mockResolvedValue({
         available: true,
         currentVersion: APP_VERSION,
-        latestVersion: "0.9.8",
+        latestVersion: "0.9.9",
         status: "available",
       }),
       downloadUpdate: vi.fn().mockResolvedValue({
         available: true,
         currentVersion: APP_VERSION,
-        latestVersion: "0.9.8",
+        latestVersion: "0.9.9",
         status: "ready",
       }),
       installUpdate: vi.fn().mockResolvedValue({
         available: true,
         currentVersion: APP_VERSION,
-        latestVersion: "0.9.8",
+        latestVersion: "0.9.9",
         status: "installing",
       }),
       onUpdateStateChanged: vi.fn((callback) => {
@@ -234,7 +234,7 @@ describe("InventoryShell shell", () => {
       updateListener({
         available: true,
         currentVersion: APP_VERSION,
-        latestVersion: "0.9.8",
+        latestVersion: "0.9.9",
         status: "downloading",
       });
     });
@@ -244,7 +244,7 @@ describe("InventoryShell shell", () => {
       updateListener({
         available: true,
         currentVersion: APP_VERSION,
-        latestVersion: "0.9.8",
+        latestVersion: "0.9.9",
         status: "ready",
       });
     });

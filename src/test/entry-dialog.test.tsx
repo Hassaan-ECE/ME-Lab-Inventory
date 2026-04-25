@@ -34,7 +34,7 @@ describe("EntryDialog", () => {
     mockMatchMedia(false);
   });
 
-  it("shows the picture path in the preview and saves it with the entry input", async () => {
+  it("hides the picture path from the preview but saves it with the entry input", async () => {
     const user = userEvent.setup();
     const onSave = vi.fn().mockResolvedValue(undefined) as unknown as (_: InventoryEntryInput) => Promise<void>;
 
@@ -48,7 +48,8 @@ describe("EntryDialog", () => {
     );
 
     expect(screen.queryByLabelText("Picture Path")).not.toBeInTheDocument();
-    expect(screen.getByText("C:\\Pictures\\fixture-plate.jpg")).toBeInTheDocument();
+    expect(screen.queryByText("C:\\Pictures\\fixture-plate.jpg")).not.toBeInTheDocument();
+    expect(screen.queryByText("Selected image")).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Save Entry" }));
 
@@ -59,8 +60,9 @@ describe("EntryDialog", () => {
     );
   });
 
-  it("fills the picture path from the desktop picker", async () => {
+  it("fills the picture path from the desktop picker without showing the selected path", async () => {
     const user = userEvent.setup();
+    const onSave = vi.fn().mockResolvedValue(undefined) as unknown as (_: InventoryEntryInput) => Promise<void>;
     const pickPicturePath = vi.fn().mockResolvedValue("C:\\Pictures\\selected-image.jpg");
     window.inventoryDesktop = createDesktopBridge({
       pickPicturePath,
@@ -70,15 +72,26 @@ describe("EntryDialog", () => {
       <EntryDialog
         mode="add"
         onClose={vi.fn()}
-        onSave={vi.fn()}
+        onSave={onSave}
       />,
     );
 
+    await user.type(screen.getByLabelText("Asset Number"), "ME-900");
     await user.click(screen.getByRole("button", { name: "Browse" }));
 
     expect(pickPicturePath).toHaveBeenCalledTimes(1);
     expect(screen.queryByLabelText("Picture Path")).not.toBeInTheDocument();
-    expect(screen.getByText("C:\\Pictures\\selected-image.jpg")).toBeInTheDocument();
+    expect(screen.queryByText("C:\\Pictures\\selected-image.jpg")).not.toBeInTheDocument();
+    expect(screen.queryByText("Selected image")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Save Entry" }));
+
+    expect(onSave).toHaveBeenCalledWith(
+      expect.objectContaining({
+        assetNumber: "ME-900",
+        picturePath: "C:\\Pictures\\selected-image.jpg",
+      }),
+    );
   });
 
   it("opens the picture in the desktop viewer from the large-screen preview", async () => {

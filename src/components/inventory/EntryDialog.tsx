@@ -489,9 +489,6 @@ function PicturePreviewCard({
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Picture Preview</p>
-          <p className="mt-1 text-sm text-foreground">
-            {!hasPicture ? "No picture selected" : previewState === "missing" ? "Picture not found" : "Selected image"}
-          </p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
           {hasPicture ? (
@@ -554,8 +551,6 @@ function PicturePreviewCard({
           <PreviewPlaceholder icon={hasPicture ? ImageOffIcon : ImageIcon} label={hasPicture ? "Picture not found" : "No picture selected"} />
         )}
       </div>
-
-      {hasPicture ? <p className="mt-3 break-all text-xs text-muted-foreground">{trimmedPath}</p> : null}
     </section>
   );
 }
