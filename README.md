@@ -2,7 +2,7 @@
 
 ME Inventory is an Electron desktop application for managing ME lab inventory entries. It uses a SQLite-backed local cache, optional shared-drive synchronization, archive handling, searchable/sortable tables, entry editing, and Excel export.
 
-Current app display name: `ME Inventory v0.9.5`.
+Current app display name: `ME Inventory v0.9.6`.
 
 ## Current Status
 
@@ -77,6 +77,8 @@ Right-clicking an entry opens actions for:
 - `Search Online`
 - `Archive Entry` or `Restore Entry`
 - `Delete Entry`
+
+Archive and restore actions run immediately and report completion in the status strip. Delete uses an in-app confirmation dialog to prevent accidental removal.
 
 ### Full Entry Dialog
 
@@ -220,6 +222,8 @@ The Color Rows toggle uses a visible selected state with primary background, bor
 
 Text inputs use an explicit inner stacking layer so the decorative input wrapper cannot interfere with focus or typing.
 
+The app version is sourced from `package.json` and shared across the renderer header, document title, Electron window title, and packaging metadata.
+
 ## Scripts
 
 Install dependencies:
@@ -281,13 +285,13 @@ Current packaging notes:
 - packaged product name: `ME Inventory`
 - app id: `com.syedhassaan.me-inventory`
 - package name: `me-inventory`
-- version: `0.9.5`
+- version: `0.9.6`
 - the database is included through `extraResources`
 - the app, installer, and executable use `electron/assets/app_icon.ico`
 
 Typical packaged output:
 
-- `release/ME Inventory Setup 0.9.5.exe`
+- `release/ME Inventory Setup 0.9.6.exe`
 
 ## Repository Layout
 

@@ -65,7 +65,7 @@ describe("InventoryShell entry actions", () => {
 
   it("archives an entry from the right-click menu", async () => {
     const user = userEvent.setup();
-    vi.spyOn(window, "confirm").mockReturnValue(true);
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
 
     render(<InventoryShell />);
 
@@ -76,9 +76,59 @@ describe("InventoryShell entry actions", () => {
 
     expect(screen.queryByText("Industrial multimeter")).not.toBeInTheDocument();
     expect(screen.getByText("Entry moved to the archive.")).toBeInTheDocument();
+    expect(confirm).not.toHaveBeenCalled();
 
     await user.click(screen.getAllByRole("button", { name: /Archive/i })[0]);
     expect(await screen.findByText("Industrial multimeter")).toBeInTheDocument();
+  });
+
+  it("restores an entry from the right-click menu without a browser prompt", async () => {
+    const user = userEvent.setup();
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+
+    render(<InventoryShell />);
+
+    await user.click(screen.getAllByRole("button", { name: /Archive/i })[0]);
+    fireEvent.contextMenu(screen.getByText("Cabinet table saw"));
+    await user.click(await screen.findByRole("button", { name: "Restore Entry" }));
+
+    expect(screen.queryByText("Cabinet table saw")).not.toBeInTheDocument();
+    expect(screen.getByText("Entry restored to inventory.")).toBeInTheDocument();
+    expect(confirm).not.toHaveBeenCalled();
+  });
+
+  it("opens a styled delete dialog and cancels without deleting", async () => {
+    const user = userEvent.setup();
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    render(<InventoryShell />);
+
+    fireEvent.contextMenu(screen.getByText("Industrial multimeter"));
+    await user.click(await screen.findByRole("button", { name: "Delete Entry" }));
+
+    expect(screen.getByText("Delete this entry?")).toBeInTheDocument();
+    expect(screen.getAllByText("Industrial multimeter").length).toBeGreaterThan(0);
+    expect(confirm).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(screen.queryByText("Delete this entry?")).not.toBeInTheDocument();
+    expect(screen.getByText("Industrial multimeter")).toBeInTheDocument();
+  });
+
+  it("deletes an entry only after confirming in the app dialog", async () => {
+    const user = userEvent.setup();
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    render(<InventoryShell />);
+
+    fireEvent.contextMenu(screen.getByText("Industrial multimeter"));
+    await user.click(await screen.findByRole("button", { name: "Delete Entry" }));
+    await user.click(screen.getByRole("button", { name: "Delete Entry" }));
+
+    expect(screen.queryByText("Industrial multimeter")).not.toBeInTheDocument();
+    expect(screen.getByText("Entry deleted.")).toBeInTheDocument();
+    expect(confirm).not.toHaveBeenCalled();
   });
 
   it("hides the saved-link action when a row has no link", () => {

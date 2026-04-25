@@ -58,39 +58,39 @@ describe("shared updater", () => {
   });
 
   it("downloads and verifies a newer shared installer", async () => {
-    const installerPath = writeSharedInstaller("releases/0.9.6/ME_Lab_Inventory_Setup.exe", "installer-content");
+    const installerPath = writeSharedInstaller("releases/0.9.7/ME_Lab_Inventory_Setup.exe", "installer-content");
     writeManifest({
-      installer_path: "releases/0.9.6/ME_Lab_Inventory_Setup.exe",
+      installer_path: "releases/0.9.7/ME_Lab_Inventory_Setup.exe",
       notes: "Patch release",
       published_at: "2026-04-24T12:00:00-05:00",
       sha256: hashText("installer-content"),
-      version: "0.9.6",
+      version: "0.9.7",
     });
 
     const updater = updaterModule.createSharedUpdater({
-      currentVersion: "0.9.5",
+      currentVersion: "0.9.6",
       executablePath: process.execPath,
       userDataPath,
     });
 
     const available = await updater.checkForUpdate();
     expect(available.status).toBe("available");
-    expect(available.latestVersion).toBe("0.9.6");
+    expect(available.latestVersion).toBe("0.9.7");
 
     const downloaded = await updater.downloadUpdate();
     expect(downloaded.status).toBe("ready");
-    expect(fs.existsSync(path.join(userDataPath, "updates", "0.9.6", path.basename(installerPath)))).toBe(true);
+    expect(fs.existsSync(path.join(userDataPath, "updates", "0.9.7", path.basename(installerPath)))).toBe(true);
   });
 
   it("rejects installer paths outside the shared update root", async () => {
     writeManifest({
       installer_path: "..\\outside.exe",
       sha256: hashText("outside"),
-      version: "0.9.6",
+      version: "0.9.7",
     });
 
     const updater = updaterModule.createSharedUpdater({
-      currentVersion: "0.9.5",
+      currentVersion: "0.9.6",
       executablePath: process.execPath,
       userDataPath,
     });
@@ -102,15 +102,15 @@ describe("shared updater", () => {
   });
 
   it("rejects downloaded installers with a mismatched checksum", async () => {
-    writeSharedInstaller("releases/0.9.6/ME_Lab_Inventory_Setup.exe", "installer-content");
+    writeSharedInstaller("releases/0.9.7/ME_Lab_Inventory_Setup.exe", "installer-content");
     writeManifest({
-      installer_path: "releases/0.9.6/ME_Lab_Inventory_Setup.exe",
+      installer_path: "releases/0.9.7/ME_Lab_Inventory_Setup.exe",
       sha256: hashText("different-content"),
-      version: "0.9.6",
+      version: "0.9.7",
     });
 
     const updater = updaterModule.createSharedUpdater({
-      currentVersion: "0.9.5",
+      currentVersion: "0.9.6",
       executablePath: process.execPath,
       userDataPath,
     });

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
+import { APP_DISPLAY_NAME, APP_VERSION } from "@/branding";
 import { InventoryShell } from "@/components/inventory/InventoryShell";
 import type { InventoryEntry, InventorySharedStatus } from "@/types/inventory";
 
@@ -34,7 +35,8 @@ describe("InventoryShell shell", () => {
     render(<InventoryShell />);
 
     expect(screen.getAllByText("ME Inventory")).toHaveLength(1);
-    expect(screen.getByText("v0.9.5")).toBeInTheDocument();
+    expect(screen.getByText(`v${APP_VERSION}`)).toBeInTheDocument();
+    expect(document.title).toBe(APP_DISPLAY_NAME);
     expect(screen.queryByText(/prototype/i)).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Import Data" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Export/i })).toBeInTheDocument();
@@ -212,8 +214,8 @@ describe("InventoryShell shell", () => {
       exportExcel: vi.fn().mockResolvedValue({ canceled: false, outputPath: "D:/exports/ME_Inventory_Export.xlsx" }),
       checkForUpdate: vi.fn().mockResolvedValue({
         available: true,
-        currentVersion: "0.9.5",
-        latestVersion: "0.9.6",
+        currentVersion: APP_VERSION,
+        latestVersion: "0.9.7",
         status: "available",
       }),
       downloadUpdate: vi.fn().mockReturnValue(downloadPromise),
@@ -232,8 +234,8 @@ describe("InventoryShell shell", () => {
 
     resolveDownload({
       available: true,
-      currentVersion: "0.9.5",
-      latestVersion: "0.9.6",
+      currentVersion: APP_VERSION,
+      latestVersion: "0.9.7",
       status: "ready",
     });
 

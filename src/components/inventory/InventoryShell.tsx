@@ -1,6 +1,6 @@
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 
-import { APP_VERSION } from "@/branding";
+import { APP_DISPLAY_NAME, APP_VERSION } from "@/branding";
 import { ColumnMenu } from "@/components/inventory/ColumnMenu";
 import { EmptyResults } from "@/components/inventory/EmptyResults";
 import { FilterPanel } from "@/components/inventory/FilterPanel";
@@ -10,6 +10,7 @@ import { EntryDialog } from "@/components/inventory/EntryDialog";
 import { InventoryTable } from "@/components/inventory/InventoryTable";
 import { SearchCard } from "@/components/inventory/SearchCard";
 import { StatusStrip } from "@/components/inventory/StatusStrip";
+import { Button } from "@/components/ui/button";
 import { MOCK_INVENTORY } from "@/data/mockInventory";
 import {
   DEFAULT_FILTERS,
@@ -84,6 +85,7 @@ export function InventoryShell() {
   const [statusOverride, setStatusOverride] = useState<string | null>(null);
   const [dialogState, setDialogState] = useState<DialogState | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+  const [pendingDeleteEntryId, setPendingDeleteEntryId] = useState<string | null>(null);
   const [updateState, setUpdateState] = useState<UpdateState>(() => buildIdleUpdateState());
   const statusTimeoutRef = useRef<number | null>(null);
   const syncInFlightRef = useRef(false);
@@ -131,6 +133,10 @@ export function InventoryShell() {
     },
     [markSharedUnavailable],
   );
+
+  useEffect(() => {
+    document.title = APP_DISPLAY_NAME;
+  }, []);
 
   useEffect(() => {
     document.documentElement.classList.toggle("dark", theme === "dark");
@@ -267,6 +273,7 @@ export function InventoryShell() {
     : statusOverride ?? buildDefaultStatusMessage(counts.total, counts.verified, dataSource, sharedStatus);
   const dialogEntry = dialogState?.mode === "edit" ? entriesById.get(dialogState.entryId ?? "") ?? null : null;
   const contextEntry = contextMenu ? entriesById.get(contextMenu.entryId) ?? null : null;
+  const pendingDeleteEntry = pendingDeleteEntryId ? entriesById.get(pendingDeleteEntryId) ?? null : null;
 
   function announceStatus(message: string): void {
     setStatusOverride(message);
@@ -414,15 +421,6 @@ export function InventoryShell() {
       return;
     }
 
-    const shouldProceed = window.confirm(
-      archived
-        ? "Archive this entry and move it out of the Inventory view?"
-        : "Restore this entry and move it back into Inventory?",
-    );
-    if (!shouldProceed) {
-      return;
-    }
-
     if (dataSource === "desktop" && window.inventoryDesktop?.setArchivedEntry && isDatabaseEntryId(entryId)) {
       try {
         const updatedEntry = await runDesktopMutation(() => window.inventoryDesktop!.setArchivedEntry(entryId, archived));
@@ -440,7 +438,7 @@ export function InventoryShell() {
     announceStatus(archived ? "Entry moved to the archive." : "Entry restored to inventory.");
   }
 
-  async function handleDeleteEntry(entryId: string): Promise<void> {
+  function handleRequestDeleteEntry(entryId: string): void {
     if (dataSource === "desktop" && !canModifyEntries) {
       announceStatus(sharedStatus.message || "Shared workspace unavailable. Saving changes locally.");
       return;
@@ -451,10 +449,11 @@ export function InventoryShell() {
       return;
     }
 
-    const shouldProceed = window.confirm(`Delete this entry?\n\n${entry.description || entry.manufacturer || `ID ${entryId}`}`);
-    if (!shouldProceed) {
-      return;
-    }
+    setPendingDeleteEntryId(entryId);
+  }
+
+  async function handleConfirmDeleteEntry(entryId: string): Promise<void> {
+    setPendingDeleteEntryId(null);
 
     if (dataSource === "desktop" && window.inventoryDesktop?.deleteEntry && isDatabaseEntryId(entryId)) {
       try {
@@ -606,7 +605,7 @@ export function InventoryShell() {
         return;
       }
       case "delete":
-        await handleDeleteEntry(entryId);
+        handleRequestDeleteEntry(entryId);
         return;
     }
   }
@@ -718,6 +717,78 @@ export function InventoryShell() {
           onSave={handleSaveEntry}
         />
       ) : null}
+
+      {pendingDeleteEntry ? (
+        <DeleteConfirmationDialog
+          entry={pendingDeleteEntry}
+          onCancel={() => setPendingDeleteEntryId(null)}
+          onConfirm={() => {
+            void handleConfirmDeleteEntry(pendingDeleteEntry.id);
+          }}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+interface DeleteConfirmationDialogProps {
+  entry: InventoryEntry;
+  onCancel: () => void;
+  onConfirm: () => void;
+}
+
+function DeleteConfirmationDialog({ entry, onCancel, onConfirm }: DeleteConfirmationDialogProps) {
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent): void {
+      if (event.key === "Escape") {
+        onCancel();
+      }
+    }
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [onCancel]);
+
+  const title = entry.description || entry.manufacturer || entry.model || `ID ${entry.id}`;
+
+  return (
+    <div
+      aria-modal="true"
+      className="fixed inset-0 z-40 flex items-center justify-center bg-black/45 p-4"
+      role="dialog"
+      onClick={(event) => {
+        if (event.target === event.currentTarget) {
+          onCancel();
+        }
+      }}
+    >
+      <section className="w-full max-w-md rounded-2xl border border-border/70 bg-card p-5 text-card-foreground shadow-2xl">
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-destructive-foreground">Delete Entry</p>
+          <h2 className="mt-1 text-xl font-semibold tracking-tight text-foreground">Delete this entry?</h2>
+          <p className="mt-3 text-sm text-muted-foreground">
+            This removes the entry from the inventory database.
+          </p>
+        </div>
+
+        <div className="mt-4 rounded-xl border border-border/70 bg-background/70 px-4 py-3">
+          <p className="text-sm font-medium text-foreground">{title}</p>
+          {entry.assetNumber || entry.location ? (
+            <p className="mt-1 text-xs text-muted-foreground">
+              {[entry.assetNumber, entry.location].filter(Boolean).join(" | ")}
+            </p>
+          ) : null}
+        </div>
+
+        <div className="mt-5 flex justify-end gap-2">
+          <Button variant="ghost" onClick={onCancel}>
+            Cancel
+          </Button>
+          <Button className="border-destructive bg-destructive text-white hover:bg-destructive/90" onClick={onConfirm}>
+            Delete Entry
+          </Button>
+        </div>
+      </section>
     </div>
   );
 }
