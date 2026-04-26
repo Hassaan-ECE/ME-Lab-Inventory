@@ -28,6 +28,7 @@ import { INVENTORY_COLUMNS } from "@/types/inventory";
 import type {
   ColumnKey,
   FilterState,
+  InventoryCounts,
   InventoryEntry,
   InventoryEntryInput,
   InventorySharedStatus,
@@ -56,6 +57,13 @@ const DESKTOP_SHARED_PENDING_STATUS: InventorySharedStatus = {
   mutationMode: "local",
   syncIntervalMs: DEFAULT_SHARED_SYNC_INTERVAL_MS,
 };
+const EMPTY_COUNTS: InventoryCounts = {
+  archive: 0,
+  inventory: 0,
+  total: 0,
+  verified: 0,
+};
+const DESKTOP_QUERY_LIMIT = 100_000;
 
 interface DialogState {
   mode: "add" | "edit";
@@ -80,6 +88,8 @@ export function InventoryShell() {
   const [columnVisibility, setColumnVisibility] = useState<Record<ColumnKey, boolean>>(() => readColumnVisibility());
   const [sortState, setSortState] = useState<SortState>({ column: "manufacturer", direction: "asc" });
   const [isLoading, setIsLoading] = useState<boolean>(() => hasDesktopBridge());
+  const [desktopCounts, setDesktopCounts] = useState<InventoryCounts>(EMPTY_COUNTS);
+  const [totalFiltered, setTotalFiltered] = useState(0);
   const [sharedStatus, setSharedStatus] = useState<InventorySharedStatus>(() =>
     hasDesktopBridge() ? DESKTOP_SHARED_PENDING_STATUS : MOCK_SHARED_STATUS,
   );
@@ -90,6 +100,8 @@ export function InventoryShell() {
   const [updateState, setUpdateState] = useState<UpdateState>(() => buildIdleUpdateState());
   const statusTimeoutRef = useRef<number | null>(null);
   const syncInFlightRef = useRef(false);
+  const initialSyncStartedRef = useRef(false);
+  const queryRequestRef = useRef(0);
 
   const markSharedUnavailable = useCallback((message = "Shared workspace unavailable. Saving changes locally."): void => {
     setSharedStatus((current) => ({
@@ -103,6 +115,57 @@ export function InventoryShell() {
       syncIntervalMs: current.syncIntervalMs ?? DEFAULT_SHARED_SYNC_INTERVAL_MS,
     }));
   }, []);
+
+  const deferredQuery = useDeferredValue(query);
+  const deferredFilters = useDeferredValue(filters);
+
+  const refreshDesktopQuery = useCallback(
+    async ({ applyResult = true, showLoading = false }: { applyResult?: boolean; showLoading?: boolean } = {}): Promise<void> => {
+      if (!window.inventoryDesktop?.queryInventory && !window.inventoryDesktop?.loadInventory) {
+        return;
+      }
+
+      const requestId = queryRequestRef.current + 1;
+      queryRequestRef.current = requestId;
+      if (showLoading) {
+        setIsLoading(true);
+      }
+      try {
+        const payload = window.inventoryDesktop.queryInventory
+          ? await window.inventoryDesktop.queryInventory({
+              filters: deferredFilters,
+              limit: DESKTOP_QUERY_LIMIT,
+              offset: 0,
+              query: deferredQuery,
+              scope,
+              sort: sortState,
+            })
+          : await loadDesktopInventoryFallback(scope, deferredQuery, deferredFilters, sortState);
+        if (!applyResult || requestId !== queryRequestRef.current) {
+          return;
+        }
+        setEntries(payload.entries);
+        setDesktopCounts(payload.counts);
+        setTotalFiltered(payload.totalFiltered);
+        setDataSource("desktop");
+        setSharedStatus((current) => (sharedStatusesMatch(current, payload.shared) ? current : payload.shared));
+      } catch {
+        if (applyResult) {
+          setEntries(MOCK_INVENTORY);
+          setDesktopCounts(EMPTY_COUNTS);
+          setTotalFiltered(MOCK_INVENTORY.length);
+          setDataSource("mock");
+          setSharedStatus(MOCK_SHARED_STATUS);
+          announceStatus("Database unavailable. Falling back to bundled mock data.");
+        }
+      } finally {
+        if (applyResult && requestId === queryRequestRef.current) {
+          setIsLoading(false);
+        }
+      }
+    },
+    [deferredFilters, deferredQuery, scope, sortState],
+  );
 
   const syncEntriesFromDesktop = useCallback(
     async ({ applyResult = true }: { applyResult?: boolean } = {}): Promise<void> => {
@@ -119,20 +182,18 @@ export function InventoryShell() {
         if (!applyResult) {
           return;
         }
-        if (payload.entriesChanged !== false) {
-          setEntries(payload.entries);
-        }
-        setDataSource("desktop");
         setSharedStatus((current) => (sharedStatusesMatch(current, payload.shared) ? current : payload.shared));
+        await refreshDesktopQuery({ applyResult });
       } catch {
         if (applyResult) {
           markSharedUnavailable();
+          await refreshDesktopQuery({ applyResult });
         }
       } finally {
         syncInFlightRef.current = false;
       }
     },
-    [markSharedUnavailable],
+    [markSharedUnavailable, refreshDesktopQuery],
   );
 
   useEffect(() => {
@@ -164,34 +225,14 @@ export function InventoryShell() {
     let active = true;
 
     async function loadEntriesFromDesktop(): Promise<void> {
-      if (!window.inventoryDesktop?.loadInventory) {
+      if (!window.inventoryDesktop?.queryInventory && !window.inventoryDesktop?.loadInventory) {
         return;
       }
 
-      try {
-        const payload = await window.inventoryDesktop.loadInventory();
-        if (!active) {
-          return;
-        }
-        setEntries(payload.entries);
-        setSharedStatus(payload.shared ?? DESKTOP_SHARED_PENDING_STATUS);
-        setDataSource("desktop");
-        setStatusOverride(null);
-      } catch {
-        if (!active) {
-          return;
-        }
-        setEntries(MOCK_INVENTORY);
-        setDataSource("mock");
-        setSharedStatus(MOCK_SHARED_STATUS);
-        announceStatus("Database unavailable. Falling back to bundled mock data.");
-      } finally {
-        if (active) {
-          setIsLoading(false);
-        }
-      }
+      await refreshDesktopQuery({ applyResult: active, showLoading: true });
 
-      if (active) {
+      if (active && !initialSyncStartedRef.current) {
+        initialSyncStartedRef.current = true;
         void syncEntriesFromDesktop();
       }
     }
@@ -201,7 +242,7 @@ export function InventoryShell() {
     return () => {
       active = false;
     };
-  }, [syncEntriesFromDesktop]);
+  }, [refreshDesktopQuery, syncEntriesFromDesktop]);
 
   useEffect(() => {
     if (!window.inventoryDesktop?.checkForUpdate) {
@@ -255,20 +296,21 @@ export function InventoryShell() {
     };
   }, [sharedStatus.syncIntervalMs, syncEntriesFromDesktop]);
 
-  const deferredQuery = useDeferredValue(query);
-  const deferredFilters = useDeferredValue(filters);
   const filteredEntries = useMemo(
     () => filterEntries(entries, scope, deferredQuery, deferredFilters),
     [deferredFilters, deferredQuery, entries, scope],
   );
   const sortedEntries = useMemo(() => sortEntries(filteredEntries, sortState), [filteredEntries, sortState]);
-  const counts = useMemo(() => getInventoryCounts(entries), [entries]);
+  const mockCounts = useMemo(() => getInventoryCounts(entries), [entries]);
+  const counts = dataSource === "desktop" ? desktopCounts : mockCounts;
+  const displayEntries = dataSource === "desktop" ? entries : sortedEntries;
+  const displayCount = dataSource === "desktop" ? totalFiltered : sortedEntries.length;
   const canModifyEntries = dataSource !== "desktop" || sharedStatus.canModify;
   const resultsLabel = isLoading
     ? "Loading inventory entries..."
-    : buildResultsLabel(sortedEntries.length, scope, deferredQuery, deferredFilters);
+    : buildResultsLabel(displayCount, scope, deferredQuery, deferredFilters);
   const visibleColumns = useMemo(() => getVisibleColumns(columnVisibility), [columnVisibility]);
-  const entriesById = useMemo(() => new Map(entries.map((entry) => [entry.id, entry])), [entries]);
+  const entriesById = useMemo(() => new Map(displayEntries.map((entry) => [entry.id, entry])), [displayEntries]);
   const statusMessage = isLoading
     ? "Loading ME inventory database..."
     : statusOverride ?? buildDefaultStatusMessage(counts.total, counts.verified, dataSource, sharedStatus);
@@ -334,7 +376,7 @@ export function InventoryShell() {
 
   function handleOpenContextMenu(entryId: string, clientX: number, clientY: number): void {
     const menuWidth = 240;
-    const entry = entries.find((entry) => entry.id === entryId);
+    const entry = entriesById.get(entryId);
     const menuHeight = entry?.links.trim() ? 212 : 172;
     const maxX = typeof window === "undefined" ? clientX : Math.max(12, window.innerWidth - menuWidth - 12);
     const maxY = typeof window === "undefined" ? clientY : Math.max(12, window.innerHeight - menuHeight - 12);
@@ -352,15 +394,16 @@ export function InventoryShell() {
       return;
     }
 
-    const nextVerified = !entries.find((entry) => entry.id === entryId)?.verifiedInSurvey;
+    const nextVerified = !entriesById.get(entryId)?.verifiedInSurvey;
 
-    if (dataSource === "desktop" && window.inventoryDesktop?.toggleVerifiedEntry && isDatabaseEntryId(entryId)) {
+    if (dataSource === "desktop" && window.inventoryDesktop?.toggleVerifiedEntry) {
       try {
         const result = await runDesktopMutation(() => window.inventoryDesktop!.toggleVerifiedEntry(entryId, nextVerified));
         setEntries((current) =>
           current.map((entry) => (entry.id === entryId ? result.entry : entry)),
         );
         applyDesktopMutationFeedback(result);
+        void refreshDesktopQuery();
         return;
       } catch {
         announceStatus("Could not update the ME Inventory database.");
@@ -382,15 +425,16 @@ export function InventoryShell() {
     }
 
     if (dialogState?.mode === "edit" && dialogState.entryId) {
-      const existingEntry = entries.find((entry) => entry.id === dialogState.entryId);
+      const existingEntry = entriesById.get(dialogState.entryId);
       if (!existingEntry) {
         throw new Error("The selected entry could not be found.");
       }
 
-      if (dataSource === "desktop" && window.inventoryDesktop?.updateEntry && isDatabaseEntryId(dialogState.entryId)) {
+      if (dataSource === "desktop" && window.inventoryDesktop?.updateEntry) {
         const result = await runDesktopMutation(() => window.inventoryDesktop!.updateEntry(dialogState.entryId!, input));
         setEntries((current) => current.map((entry) => (entry.id === result.entry.id ? result.entry : entry)));
         applyDesktopMutationFeedback(result);
+        void refreshDesktopQuery();
       } else {
         const updatedEntry = buildLocalUpdatedEntry(existingEntry, input);
         setEntries((current) => current.map((entry) => (entry.id === updatedEntry.id ? updatedEntry : entry)));
@@ -405,6 +449,7 @@ export function InventoryShell() {
       const result = await runDesktopMutation(() => window.inventoryDesktop!.createEntry(input));
       setEntries((current) => [result.entry, ...current.filter((entry) => entry.id !== result.entry.id)]);
       applyDesktopMutationFeedback(result);
+      void refreshDesktopQuery();
     } else {
       const createdEntry = buildLocalCreatedEntry(input);
       setEntries((current) => [createdEntry, ...current]);
@@ -420,16 +465,17 @@ export function InventoryShell() {
       return;
     }
 
-    const entry = entries.find((entry) => entry.id === entryId);
+    const entry = entriesById.get(entryId);
     if (!entry || entry.archived === archived) {
       return;
     }
 
-    if (dataSource === "desktop" && window.inventoryDesktop?.setArchivedEntry && isDatabaseEntryId(entryId)) {
+    if (dataSource === "desktop" && window.inventoryDesktop?.setArchivedEntry) {
       try {
         const result = await runDesktopMutation(() => window.inventoryDesktop!.setArchivedEntry(entryId, archived));
         setEntries((current) => current.map((entry) => (entry.id === result.entry.id ? result.entry : entry)));
         applyDesktopMutationFeedback(result);
+        void refreshDesktopQuery();
       } catch {
         announceStatus("Could not update the shared inventory database.");
         return;
@@ -448,7 +494,7 @@ export function InventoryShell() {
       return;
     }
 
-    const entry = entries.find((entry) => entry.id === entryId);
+    const entry = entriesById.get(entryId);
     if (!entry) {
       return;
     }
@@ -459,11 +505,12 @@ export function InventoryShell() {
   async function handleConfirmDeleteEntry(entryId: string): Promise<void> {
     setPendingDeleteEntryId(null);
 
-    if (dataSource === "desktop" && window.inventoryDesktop?.deleteEntry && isDatabaseEntryId(entryId)) {
+    if (dataSource === "desktop" && window.inventoryDesktop?.deleteEntry) {
       try {
         const result = await runDesktopMutation(() => window.inventoryDesktop!.deleteEntry(entryId));
         setEntries((current) => current.filter((entry) => entry.id !== entryId));
         applyDesktopMutationFeedback(result);
+        void refreshDesktopQuery();
         return;
       } catch {
         announceStatus("Could not delete from the shared inventory database.");
@@ -543,7 +590,7 @@ export function InventoryShell() {
   }
 
   async function handleOpenEntryLink(entryId: string): Promise<void> {
-    const entry = entries.find((entry) => entry.id === entryId);
+    const entry = entriesById.get(entryId);
     if (!entry) {
       return;
     }
@@ -570,7 +617,7 @@ export function InventoryShell() {
   }
 
   async function handleSearchOnline(entryId: string): Promise<void> {
-    const entry = entries.find((entry) => entry.id === entryId);
+    const entry = entriesById.get(entryId);
     if (!entry) {
       return;
     }
@@ -616,7 +663,7 @@ export function InventoryShell() {
         await handleSearchOnline(entryId);
         return;
       case "archive-toggle": {
-        const entry = entries.find((entry) => entry.id === entryId);
+        const entry = entriesById.get(entryId);
         if (!entry) {
           return;
         }
@@ -687,7 +734,7 @@ export function InventoryShell() {
                 <section className="flex h-full min-h-0 flex-1 items-center justify-center rounded-3xl border border-border/70 bg-card/80 shadow-sm">
                   <div className="text-sm text-muted-foreground">Loading ME inventory database...</div>
                 </section>
-              ) : sortedEntries.length > 0 ? (
+              ) : displayEntries.length > 0 ? (
                 <InventoryTable
                   activeEntryId={contextMenu?.entryId ?? dialogEntry?.id ?? null}
                   canModifyEntries={canModifyEntries}
@@ -699,7 +746,7 @@ export function InventoryShell() {
                   onToggleVerified={(entryId) => {
                     void handleToggleVerified(entryId);
                   }}
-                  entries={sortedEntries}
+                  entries={displayEntries}
                   sortState={sortState}
                 />
               ) : (
@@ -870,6 +917,25 @@ function hasDesktopBridge(): boolean {
   return typeof window !== "undefined" && Boolean(window.inventoryDesktop?.isDesktop);
 }
 
+async function loadDesktopInventoryFallback(
+  scope: InventoryScope,
+  query: string,
+  filters: FilterState,
+  sortState: SortState,
+) {
+  const payload = await window.inventoryDesktop!.loadInventory();
+  const filtered = filterEntries(payload.entries, scope, query, filters);
+  const sorted = sortEntries(filtered, sortState);
+
+  return {
+    counts: getInventoryCounts(payload.entries),
+    dbPath: payload.dbPath,
+    entries: sorted,
+    shared: payload.shared,
+    totalFiltered: sorted.length,
+  };
+}
+
 function buildDefaultStatusMessage(
   totalCount: number,
   verifiedCount: number,
@@ -881,10 +947,6 @@ function buildDefaultStatusMessage(
     return summary;
   }
   return `${summary} | ${sharedStatus.message}`;
-}
-
-function isDatabaseEntryId(entryId: string): boolean {
-  return /^\d+$/.test(entryId);
 }
 
 async function openExternalUrl(url: string): Promise<boolean> {

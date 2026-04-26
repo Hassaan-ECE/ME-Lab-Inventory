@@ -1,11 +1,13 @@
+import fs from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
-
-import ExcelJS from "exceljs";
+import { fileURLToPath } from "node:url";
+import { Worker } from "node:worker_threads";
 
 import { resolveDbPath } from "./inventory-runtime.mjs";
 
 export const DEFAULT_EXCEL_EXPORT_FILENAME = "ME_Inventory_Export.xlsx";
+const EXPORT_WORKER_PATH = resolveBundledWorkerPath(fileURLToPath(new URL("./inventory-export-worker.mjs", import.meta.url)));
 
 const WHITE = "FFFFFF";
 const OFF_WHITE = "F9FAFB";
@@ -139,7 +141,7 @@ export async function exportExcelInventory({
   }
 
   try {
-    await writeInventoryWorkbook(runtimeContext, saveResult.filePath);
+    await writeInventoryWorkbookInWorker(runtimeContext, saveResult.filePath);
 
     if (showMessageBox) {
       await showMessageBox({
@@ -174,6 +176,7 @@ export async function exportExcelInventory({
 export async function writeInventoryWorkbook(runtimeContext, outputPath) {
   const rows = loadExportRows(runtimeContext);
   const issueRows = loadImportIssueRows(runtimeContext);
+  const { default: ExcelJS } = await import("exceljs");
   const workbook = new ExcelJS.Workbook();
 
   workbook.creator = "Syed Hassaan Shah";
@@ -199,6 +202,55 @@ export async function writeInventoryWorkbook(runtimeContext, outputPath) {
     outputPath,
     totalCount: rows.length,
   };
+}
+
+export function writeInventoryWorkbookInWorker(runtimeContext, outputPath) {
+  return new Promise((resolve, reject) => {
+    const worker = new Worker(EXPORT_WORKER_PATH, {
+      workerData: {
+        outputPath,
+        runtimeContext,
+      },
+    });
+
+    let settled = false;
+    worker.on("message", (message) => {
+      if (message?.type === "done") {
+        settled = true;
+        resolve(message.result);
+        void worker.terminate();
+        return;
+      }
+      if (message?.type === "error") {
+        settled = true;
+        reject(new Error(String(message.error || "Excel export failed.")));
+        void worker.terminate();
+      }
+    });
+    worker.on("error", (error) => {
+      if (!settled) {
+        settled = true;
+        reject(error);
+      }
+    });
+    worker.on("exit", (code) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      reject(new Error(code === 0 ? "Excel export worker exited before finishing." : `Excel export worker exited with code ${code}.`));
+    });
+  });
+}
+
+function resolveBundledWorkerPath(workerPath) {
+  const asarSegment = `${path.sep}app.asar${path.sep}`;
+  if (!workerPath.includes(asarSegment)) {
+    return workerPath;
+  }
+
+  const unpackedWorkerPath = workerPath.replace(asarSegment, `${path.sep}app.asar.unpacked${path.sep}`);
+  return fs.existsSync(unpackedWorkerPath) ? unpackedWorkerPath : workerPath;
 }
 
 function loadExportRows(runtimeContext) {

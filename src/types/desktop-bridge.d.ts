@@ -3,6 +3,8 @@ import type {
   InventoryEntry,
   InventoryEntryInput,
   InventoryEntryMutationResult,
+  InventoryQueryInput,
+  InventoryQueryResult,
   InventorySharedStatus,
   UpdateState,
 } from "@/types/inventory";
@@ -19,6 +21,7 @@ declare global {
     inventoryDesktop?: {
       isDesktop: boolean;
       loadInventory: () => Promise<InventorySyncResult>;
+      queryInventory?: (input: InventoryQueryInput) => Promise<InventoryQueryResult>;
       syncInventory: () => Promise<InventorySyncResult>;
       toggleVerifiedEntry: (entryId: string, nextVerified: boolean) => Promise<InventoryEntryMutationResult>;
       createEntry: (input: InventoryEntryInput) => Promise<InventoryEntryMutationResult>;

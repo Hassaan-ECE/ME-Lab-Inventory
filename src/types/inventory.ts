@@ -9,6 +9,7 @@ export const WORKING_STATUS_OPTIONS = ["unknown", "working", "limited", "not_wor
 
 export interface InventoryEntry {
   id: string;
+  databaseId?: number;
   assetNumber: string;
   serialNumber?: string;
   qty: number | null;
@@ -65,6 +66,13 @@ export interface InventorySharedStatus {
   syncIntervalMs?: number;
 }
 
+export interface InventoryCounts {
+  archive: number;
+  inventory: number;
+  total: number;
+  verified: number;
+}
+
 export type InventoryMutationMode = "shared" | "local";
 
 export interface InventoryEntryMutationResult {
@@ -112,6 +120,23 @@ export interface FilterState {
   model: string;
   description: string;
   location: string;
+}
+
+export interface InventoryQueryInput {
+  filters: FilterState;
+  limit?: number;
+  offset?: number;
+  query: string;
+  scope: InventoryScope;
+  sort: SortState;
+}
+
+export interface InventoryQueryResult {
+  counts: InventoryCounts;
+  dbPath: string;
+  entries: InventoryEntry[];
+  shared: InventorySharedStatus;
+  totalFiltered: number;
 }
 
 export interface ColumnConfig {

@@ -1,5 +1,5 @@
 import { ArrowUpDownIcon, CheckIcon } from "lucide-react";
-import { memo } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 
 import { Badge } from "@/components/ui/badge";
@@ -21,6 +21,9 @@ interface InventoryTableProps {
   sortState: SortState;
 }
 
+const ROW_HEIGHT = 45;
+const OVERSCAN_ROWS = 10;
+
 export const InventoryTable = memo(function InventoryTable({
   activeEntryId = null,
   canModifyEntries,
@@ -33,9 +36,42 @@ export const InventoryTable = memo(function InventoryTable({
   entries,
   sortState,
 }: InventoryTableProps) {
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const [scrollTop, setScrollTop] = useState(0);
+  const [viewportHeight, setViewportHeight] = useState(640);
+  const visibleRange = useMemo(
+    () => getVisibleRange(entries.length, scrollTop, viewportHeight),
+    [entries.length, scrollTop, viewportHeight],
+  );
+  const visibleEntries = entries.slice(visibleRange.start, visibleRange.end);
+  const topSpacerHeight = visibleRange.start * ROW_HEIGHT;
+  const bottomSpacerHeight = Math.max(0, (entries.length - visibleRange.end) * ROW_HEIGHT);
+
+  useEffect(() => {
+    const node = scrollRef.current;
+    if (!node) {
+      return undefined;
+    }
+
+    setViewportHeight(node.clientHeight || 640);
+    if (typeof ResizeObserver === "undefined") {
+      return undefined;
+    }
+
+    const observer = new ResizeObserver(() => {
+      setViewportHeight(node.clientHeight || 640);
+    });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
+
   return (
     <section className="flex h-full min-h-0 flex-1 overflow-hidden rounded-3xl border border-border/70 bg-card/80 shadow-sm">
-      <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
+      <div
+        ref={scrollRef}
+        className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden"
+        onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}
+      >
         <table className="w-full table-fixed border-separate border-spacing-0">
           <colgroup>
             {columns.map((column) => (
@@ -74,7 +110,8 @@ export const InventoryTable = memo(function InventoryTable({
             </tr>
           </thead>
           <tbody>
-            {entries.map((entry) => (
+            {topSpacerHeight > 0 ? <SpacerRow colSpan={columns.length} height={topSpacerHeight} /> : null}
+            {visibleEntries.map((entry) => (
               <tr
                 key={entry.id}
                 className={cn(
@@ -106,12 +143,30 @@ export const InventoryTable = memo(function InventoryTable({
                 ))}
               </tr>
             ))}
+            {bottomSpacerHeight > 0 ? <SpacerRow colSpan={columns.length} height={bottomSpacerHeight} /> : null}
           </tbody>
         </table>
       </div>
     </section>
   );
 });
+
+function getVisibleRange(entryCount: number, scrollTop: number, viewportHeight: number): { end: number; start: number } {
+  const start = Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - OVERSCAN_ROWS);
+  const visibleCount = Math.ceil(viewportHeight / ROW_HEIGHT) + OVERSCAN_ROWS * 2;
+  return {
+    end: Math.min(entryCount, start + visibleCount),
+    start,
+  };
+}
+
+function SpacerRow({ colSpan, height }: { colSpan: number; height: number }) {
+  return (
+    <tr aria-hidden="true">
+      <td colSpan={colSpan} style={{ height, padding: 0 }} />
+    </tr>
+  );
+}
 
 function renderCell(
   entry: InventoryEntry,

@@ -1,18 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { Worker } from "node:worker_threads";
 
 import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
 
-import {
-  createInventoryEntry,
-  deleteInventoryEntry,
-  loadInventoryEntries,
-  setArchivedEntry,
-  syncInventoryWithShared,
-  toggleVerifiedEntry,
-  updateInventoryEntry,
-} from "./inventory-db.mjs";
 import { exportExcelInventory } from "./inventory-export.mjs";
 import { resolveSharedDbPath, resolveSharedDirectoryPath } from "./inventory-runtime.mjs";
 import { createSharedUpdater } from "./updater.mjs";
@@ -23,12 +15,17 @@ const __dirname = path.dirname(__filename);
 const projectRoot = path.resolve(__dirname, "..");
 const preloadPath = path.join(__dirname, "preload.mjs");
 const appIconPath = path.join(__dirname, "assets", "app_icon.ico");
+const inventoryWorkerPath = resolveBundledWorkerPath(path.join(__dirname, "inventory-db-worker.mjs"));
 const devServerUrl = process.env.VITE_DEV_SERVER_URL;
 
 let mainWindow = null;
 let sharedWatcher = null;
 let sharedWatchDebounce = null;
 let sharedUpdater = null;
+let inventoryWorker = null;
+let inventoryWorkerRequestId = 0;
+let backgroundSyncTimeout = null;
+const inventoryWorkerRequests = new Map();
 
 function buildRuntimeContext() {
   return {
@@ -126,6 +123,76 @@ function getSharedUpdater() {
   return sharedUpdater;
 }
 
+function getInventoryWorker() {
+  if (inventoryWorker) {
+    return inventoryWorker;
+  }
+
+  inventoryWorker = new Worker(inventoryWorkerPath);
+  inventoryWorker.on("message", (message) => {
+    const request = inventoryWorkerRequests.get(message?.id);
+    if (!request) {
+      return;
+    }
+
+    inventoryWorkerRequests.delete(message.id);
+    if (message.type === "error") {
+      request.reject(new Error(String(message.error || "Inventory worker failed.")));
+      return;
+    }
+    request.resolve(message.result);
+  });
+  inventoryWorker.on("error", (error) => {
+    rejectInventoryWorkerRequests(error);
+    inventoryWorker = null;
+  });
+  inventoryWorker.on("exit", (code) => {
+    if (code !== 0) {
+      rejectInventoryWorkerRequests(new Error(`Inventory worker exited with code ${code}.`));
+    }
+    inventoryWorker = null;
+  });
+
+  return inventoryWorker;
+}
+
+function rejectInventoryWorkerRequests(error) {
+  for (const request of inventoryWorkerRequests.values()) {
+    request.reject(error);
+  }
+  inventoryWorkerRequests.clear();
+}
+
+function invokeInventoryWorker(action, ...args) {
+  return new Promise((resolve, reject) => {
+    const id = `${Date.now()}-${++inventoryWorkerRequestId}`;
+    inventoryWorkerRequests.set(id, { reject, resolve });
+    getInventoryWorker().postMessage({
+      action,
+      args,
+      id,
+    });
+  });
+}
+
+function scheduleBackgroundSync() {
+  if (backgroundSyncTimeout) {
+    clearTimeout(backgroundSyncTimeout);
+  }
+
+  backgroundSyncTimeout = setTimeout(() => {
+    backgroundSyncTimeout = null;
+    void invokeInventoryWorker("syncInventoryWithShared", buildRuntimeContext())
+      .then(() => {
+        refreshSharedWatcher();
+        mainWindow?.webContents.send("inventory:shared-changed");
+      })
+      .catch(() => {
+        mainWindow?.webContents.send("inventory:shared-changed");
+      });
+  }, 150);
+}
+
 function refreshSharedWatcher() {
   const watchTargets = [resolveSharedDbPath(), resolveSharedDirectoryPath()].filter((candidate) =>
     candidate && fs.existsSync(candidate),
@@ -159,27 +226,40 @@ function refreshSharedWatcher() {
 app.whenReady().then(() => {
   app.setAppUserModelId("com.syedhassaan.me-inventory");
 
-  ipcMain.handle("inventory:load", () => loadInventoryEntries(buildRuntimeContext()));
-  ipcMain.handle("inventory:sync", () => {
-    const result = syncInventoryWithShared(buildRuntimeContext());
+  ipcMain.handle("inventory:load", () => invokeInventoryWorker("loadInventoryEntries", buildRuntimeContext()));
+  ipcMain.handle("inventory:query", (_event, input) =>
+    invokeInventoryWorker("queryInventoryEntries", buildRuntimeContext(), input),
+  );
+  ipcMain.handle("inventory:sync", async () => {
+    const result = await invokeInventoryWorker("syncInventoryWithShared", buildRuntimeContext());
     refreshSharedWatcher();
     return result;
   });
-  ipcMain.handle("inventory:toggle-verified-entry", (_event, entryId, nextVerified) =>
-    toggleVerifiedEntry(buildRuntimeContext(), entryId, nextVerified),
-  );
-  ipcMain.handle("inventory:create-entry", (_event, entryInput) =>
-    createInventoryEntry(buildRuntimeContext(), entryInput),
-  );
-  ipcMain.handle("inventory:update-entry", (_event, entryId, entryInput) =>
-    updateInventoryEntry(buildRuntimeContext(), entryId, entryInput),
-  );
-  ipcMain.handle("inventory:set-archived-entry", (_event, entryId, archived) =>
-    setArchivedEntry(buildRuntimeContext(), entryId, archived),
-  );
-  ipcMain.handle("inventory:delete-entry", (_event, entryId) =>
-    deleteInventoryEntry(buildRuntimeContext(), entryId),
-  );
+  ipcMain.handle("inventory:toggle-verified-entry", async (_event, entryId, nextVerified) => {
+    const result = await invokeInventoryWorker("toggleVerifiedEntry", buildRuntimeContext(), entryId, nextVerified);
+    scheduleBackgroundSync();
+    return result;
+  });
+  ipcMain.handle("inventory:create-entry", async (_event, entryInput) => {
+    const result = await invokeInventoryWorker("createInventoryEntry", buildRuntimeContext(), entryInput);
+    scheduleBackgroundSync();
+    return result;
+  });
+  ipcMain.handle("inventory:update-entry", async (_event, entryId, entryInput) => {
+    const result = await invokeInventoryWorker("updateInventoryEntry", buildRuntimeContext(), entryId, entryInput);
+    scheduleBackgroundSync();
+    return result;
+  });
+  ipcMain.handle("inventory:set-archived-entry", async (_event, entryId, archived) => {
+    const result = await invokeInventoryWorker("setArchivedEntry", buildRuntimeContext(), entryId, archived);
+    scheduleBackgroundSync();
+    return result;
+  });
+  ipcMain.handle("inventory:delete-entry", async (_event, entryId) => {
+    const result = await invokeInventoryWorker("deleteInventoryEntry", buildRuntimeContext(), entryId);
+    scheduleBackgroundSync();
+    return result;
+  });
   ipcMain.handle("inventory:open-external", (_event, url) => openSafeExternalUrl(url));
   ipcMain.handle("inventory:open-path", async (_event, targetPath) => {
     if (typeof targetPath !== "string" || !targetPath.trim()) {
@@ -234,3 +314,21 @@ app.on("window-all-closed", () => {
     app.quit();
   }
 });
+
+app.on("before-quit", () => {
+  if (backgroundSyncTimeout) {
+    clearTimeout(backgroundSyncTimeout);
+    backgroundSyncTimeout = null;
+  }
+  inventoryWorker?.terminate();
+});
+
+function resolveBundledWorkerPath(workerPath) {
+  const asarSegment = `${path.sep}app.asar${path.sep}`;
+  if (!workerPath.includes(asarSegment)) {
+    return workerPath;
+  }
+
+  const unpackedWorkerPath = workerPath.replace(asarSegment, `${path.sep}app.asar.unpacked${path.sep}`);
+  return fs.existsSync(unpackedWorkerPath) ? unpackedWorkerPath : workerPath;
+}

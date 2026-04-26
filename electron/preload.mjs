@@ -3,6 +3,7 @@ import { contextBridge, ipcRenderer } from "electron";
 contextBridge.exposeInMainWorld("inventoryDesktop", {
   isDesktop: true,
   loadInventory: () => ipcRenderer.invoke("inventory:load"),
+  queryInventory: (input) => ipcRenderer.invoke("inventory:query", input),
   syncInventory: () => ipcRenderer.invoke("inventory:sync"),
   toggleVerifiedEntry: (entryId, nextVerified) =>
     ipcRenderer.invoke("inventory:toggle-verified-entry", entryId, nextVerified),

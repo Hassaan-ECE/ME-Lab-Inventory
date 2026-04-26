@@ -1,6 +1,7 @@
 /* @vitest-environment node */
 
 import fs from "node:fs";
+import { randomUUID } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -31,6 +32,26 @@ interface InventoryDbModule {
     entries: InventoryEntry[];
     entriesChanged?: boolean;
     shared: { canModify: boolean; hasLocalOnlyChanges?: boolean; message: string; mutationMode?: "shared" | "local" };
+  };
+  queryInventoryEntries: (
+    runtimeContext: RuntimeContext,
+    input: {
+      filters: {
+        assetNumber: string;
+        description: string;
+        location: string;
+        manufacturer: string;
+        model: string;
+      };
+      limit?: number;
+      offset?: number;
+      query: string;
+      scope: "inventory" | "archive";
+      sort: { column: "manufacturer" | "description" | "qty"; direction: "asc" | "desc" };
+    },
+  ) => {
+    entries: InventoryEntry[];
+    totalFiltered: number;
   };
   setArchivedEntry: (runtimeContext: RuntimeContext, entryId: string, archived: boolean) => InventoryEntryMutationResult;
   syncInventoryWithShared: (runtimeContext: RuntimeContext) => {
@@ -115,8 +136,8 @@ describe("inventory desktop database mutations", () => {
     });
     const created = createdResult.entry;
 
-    expect(createdResult.mutationMode).toBe("shared");
-    expect(createdResult.message).toBe("Entry added to the ME Inventory database.");
+    expect(createdResult.mutationMode).toBe("local");
+    expect(createdResult.message).toBe("Entry added locally. Sync pending.");
     expect(created.description).toBe("Desktop CRUD test entry");
     expect(created.picturePath).toBe("C:\\Pictures\\fixture-plate.jpg");
     expect(inventoryDb.loadInventoryEntries(runtimeContext).entries).toHaveLength(initialEntries + 1);
@@ -132,19 +153,19 @@ describe("inventory desktop database mutations", () => {
     });
     const updated = updatedResult.entry;
 
-    expect(updatedResult.mutationMode).toBe("shared");
+    expect(updatedResult.mutationMode).toBe("local");
     expect(updated.qty).toBe(7);
     expect(updated.condition).toBe("Updated");
     expect(updated.picturePath).toBe("C:\\Pictures\\fixture-plate-updated.jpg");
 
     const verifiedResult = inventoryDb.toggleVerifiedEntry(runtimeContext, created.id, true);
     const verified = verifiedResult.entry;
-    expect(verifiedResult.message).toBe("Verified state updated in the ME Inventory database.");
+    expect(verifiedResult.message).toBe("Verified state updated locally. Sync pending.");
     expect(verified.verifiedInSurvey).toBe(true);
 
     const archivedResult = inventoryDb.setArchivedEntry(runtimeContext, created.id, true);
     const archived = archivedResult.entry;
-    expect(archivedResult.message).toBe("Entry moved to the archive.");
+    expect(archivedResult.message).toBe("Entry moved to the archive locally. Sync pending.");
     expect(archived.archived).toBe(true);
 
     const deletion = inventoryDb.deleteInventoryEntry(runtimeContext, created.id);
@@ -164,6 +185,46 @@ describe("inventory desktop database mutations", () => {
     expect(result.shared.canModify).toBe(true);
     expect(result.entriesChanged).toBe(false);
     expect(inventoryDb.loadInventoryEntries(runtimeContext).entries.length).toBeGreaterThan(0);
+  });
+
+  it("queries entries through SQLite search, filters, and sort", () => {
+    const runtimeContext = buildRuntimeContext(tempDir);
+    inventoryDb.createInventoryEntry(runtimeContext, {
+      archived: false,
+      assetNumber: "ME-QUERY",
+      assignedTo: "",
+      condition: "",
+      description: "Needle query marker",
+      lifecycleStatus: "active",
+      links: "",
+      location: "Query Shelf",
+      manufacturer: "Query Maker",
+      model: "Q-1",
+      notes: "Searchable notes",
+      projectName: "",
+      qty: 2,
+      serialNumber: "",
+      verifiedInSurvey: false,
+      workingStatus: "working",
+    });
+
+    const result = inventoryDb.queryInventoryEntries(runtimeContext, {
+      filters: {
+        assetNumber: "",
+        description: "",
+        location: "Query",
+        manufacturer: "",
+        model: "",
+      },
+      limit: 10,
+      offset: 0,
+      query: "needle",
+      scope: "inventory",
+      sort: { column: "description", direction: "asc" },
+    });
+
+    expect(result.totalFiltered).toBe(1);
+    expect(result.entries[0].description).toBe("Needle query marker");
   });
 
   it("does not rewrite either database when equal revisions have no entry changes", () => {
@@ -193,30 +254,29 @@ describe("inventory desktop database mutations", () => {
     const sharedDbPath = inventoryDb.syncInventoryWithShared(runtimeContext).shared.sharedDbPath;
     expect(sharedDbPath).toBeTruthy();
 
-    const sharedDb = new DatabaseSync(sharedDbPath!);
-    const target = sharedDb.prepare("SELECT entry_uuid FROM entries LIMIT 1").get();
-    const targetUuid = String(target?.entry_uuid ?? "");
-    expect(targetUuid).not.toBe("");
-    sharedDb
-      .prepare("UPDATE entries SET description = ?, updated_at = datetime('now') WHERE entry_uuid = ?")
-      .run("Updated from shared test", targetUuid);
-    sharedDb.prepare("UPDATE sync_state SET revision = '99', updated_at = datetime('now') WHERE id = 1").run();
-    sharedDb.close();
+    const targetUuid = insertSharedUpsertOperation(sharedDbPath!, {
+      description: "Updated from shared test",
+    });
 
     const result = inventoryDb.syncInventoryWithShared(runtimeContext);
 
     expect(result.entriesChanged).toBe(true);
-    expect(result.entries.some((entry) => entry.description === "Updated from shared test")).toBe(true);
+    expect(result.entries.some((entry) => entry.entryUuid === targetUuid && entry.description === "Updated from shared test")).toBe(true);
   });
 
-  it("overwrites divergent local cache rows with shared authority", () => {
+  it("applies newer shared operations over divergent local cache rows", () => {
     const runtimeContext = buildRuntimeContext(tempDir);
-    inventoryDb.syncInventoryWithShared(runtimeContext);
+    const sharedDbPath = inventoryDb.syncInventoryWithShared(runtimeContext).shared.sharedDbPath;
+    expect(sharedDbPath).toBeTruthy();
     const target = inventoryDb.loadInventoryEntries(runtimeContext).entries[0];
     const targetUuid = target.entryUuid ?? "";
     const localDb = new DatabaseSync(path.join(tempDir, "data", "me_inventory.db"));
     localDb.prepare("UPDATE entries SET description = ? WHERE entry_uuid = ?").run("Local divergent value", targetUuid);
     localDb.close();
+    insertSharedUpsertOperation(sharedDbPath!, {
+      description: target.description,
+      entryUuid: targetUuid,
+    });
 
     const result = inventoryDb.syncInventoryWithShared(runtimeContext);
     const refreshed = result.entries.find((entry) => entry.entryUuid === targetUuid);
@@ -272,14 +332,14 @@ describe("inventory desktop database mutations", () => {
     const archived = archivedResult.entry;
 
     expect(createdResult.mutationMode).toBe("local");
-    expect(createdResult.message).toBe("Entry added locally.");
+    expect(createdResult.message).toBe("Entry added locally. Sync pending.");
     expect(createdResult.shared?.hasLocalOnlyChanges).toBe(true);
     expect(created.description).toBe("Offline mutation");
     expect(updatedResult.mutationMode).toBe("local");
     expect(updated.location).toBe("Offline Shelf");
-    expect(verifiedResult.message).toBe("Verified state updated locally.");
+    expect(verifiedResult.message).toBe("Verified state updated locally. Sync pending.");
     expect(verified.verifiedInSurvey).toBe(true);
-    expect(archivedResult.message).toBe("Entry moved to the archive locally.");
+    expect(archivedResult.message).toBe("Entry moved to the archive locally. Sync pending.");
     expect(archived.archived).toBe(true);
     expect(getDbRevision(localDbPath)).toBeGreaterThan(initialRevision);
 
@@ -289,7 +349,7 @@ describe("inventory desktop database mutations", () => {
 
     const deletion = inventoryDb.deleteInventoryEntry(runtimeContext, created.id);
     expect(deletion.entryId).toBe(created.id);
-    expect(deletion.message).toBe("Entry deleted locally.");
+    expect(deletion.message).toBe("Entry deleted locally. Sync pending.");
     expect(inventoryDb.loadInventoryEntries(runtimeContext).entries.some((entry) => entry.id === created.id)).toBe(false);
   });
 
@@ -366,6 +426,90 @@ function getDbRevision(dbPath: string): number {
   try {
     const row = db.prepare("SELECT revision FROM sync_state WHERE id = 1 LIMIT 1").get();
     return Number.parseInt(String(row?.revision ?? "0"), 10) || 0;
+  } finally {
+    db.close();
+  }
+}
+
+function insertSharedUpsertOperation(
+  sharedDbPath: string,
+  overrides: { description: string; entryUuid?: string },
+): string {
+  const db = new DatabaseSync(sharedDbPath);
+  const opId = randomUUID();
+  const clientId = randomUUID();
+  const mutationTs = new Date(Date.now() + 1000).toISOString();
+
+  try {
+    const target =
+      overrides.entryUuid == null
+        ? db.prepare("SELECT entry_uuid FROM entries LIMIT 1").get()
+        : { entry_uuid: overrides.entryUuid };
+    const entryUuid = String(target?.entry_uuid ?? "");
+    expect(entryUuid).not.toBe("");
+
+    db.prepare("UPDATE entries SET description = ?, updated_at = ? WHERE entry_uuid = ?").run(
+      overrides.description,
+      mutationTs,
+      entryUuid,
+    );
+    const row = db.prepare("SELECT * FROM entries WHERE entry_uuid = ? LIMIT 1").get(entryUuid);
+    const payload = {
+      entry: {
+        archived: Boolean(row?.is_archived),
+        assetNumber: String(row?.asset_number ?? ""),
+        assignedTo: String(row?.assigned_to ?? ""),
+        condition: String(row?.condition ?? ""),
+        createdAt: String(row?.created_at ?? ""),
+        description: String(row?.description ?? ""),
+        entryUuid,
+        lifecycleStatus: String(row?.lifecycle_status ?? "active"),
+        links: String(row?.links ?? ""),
+        location: String(row?.location ?? ""),
+        manufacturer: String(row?.manufacturer ?? ""),
+        manualEntry: Boolean(row?.manual_entry),
+        model: String(row?.model ?? ""),
+        notes: String(row?.notes ?? ""),
+        picturePath: String(row?.picture_path ?? ""),
+        projectName: String(row?.project_name ?? ""),
+        qty: row?.qty == null ? null : Number(row.qty),
+        serialNumber: String(row?.serial_number ?? ""),
+        updatedAt: mutationTs,
+        verifiedInSurvey: Boolean(row?.verified_in_survey),
+        workingStatus: String(row?.working_status ?? "unknown"),
+      },
+    };
+
+    db.prepare(
+      `
+        INSERT INTO applied_ops (
+          op_id,
+          client_id,
+          op_type,
+          entry_uuid,
+          mutation_ts,
+          payload_json,
+          result
+        ) VALUES (?, ?, 'upsert', ?, ?, ?, 'applied_upsert')
+      `,
+    ).run(opId, clientId, entryUuid, mutationTs, JSON.stringify(payload));
+    db.prepare(
+      `
+        INSERT INTO entry_sync_state (
+          entry_uuid,
+          last_synced_hash,
+          last_mutation_ts,
+          last_op_id,
+          last_client_id
+        ) VALUES (?, '', ?, ?, ?)
+        ON CONFLICT(entry_uuid) DO UPDATE SET
+          last_mutation_ts = excluded.last_mutation_ts,
+          last_op_id = excluded.last_op_id,
+          last_client_id = excluded.last_client_id
+      `,
+    ).run(entryUuid, mutationTs, opId, clientId);
+
+    return entryUuid;
   } finally {
     db.close();
   }

@@ -4,6 +4,8 @@ declare module "../../electron/inventory-db.mjs" {
     InventoryEntry,
     InventoryEntryInput,
     InventoryEntryMutationResult,
+    InventoryQueryInput,
+    InventoryQueryResult,
     InventorySharedStatus,
   } from "@/types/inventory";
 
@@ -22,6 +24,11 @@ declare module "../../electron/inventory-db.mjs" {
   }
 
   export function loadInventoryEntries(runtimeContext: RuntimeContext): InventorySyncResult;
+
+  export function queryInventoryEntries(
+    runtimeContext: RuntimeContext,
+    input: InventoryQueryInput,
+  ): InventoryQueryResult;
 
   export function syncInventoryWithShared(runtimeContext: RuntimeContext): InventorySyncResult;
 

@@ -2,7 +2,7 @@
 
 ME Inventory is an Electron desktop application for managing ME lab inventory entries. It uses a SQLite-backed local cache, optional shared-drive synchronization, archive handling, searchable/sortable tables, entry editing, and Excel export.
 
-Current app display name: `ME Inventory v0.9.6`.
+Current app display name: `ME Inventory v0.9.7`.
 
 ## Current Status
 
@@ -124,8 +124,11 @@ The current SQLite schema uses entry terminology:
 - primary key: `entry_id`
 - stable sync key: `entry_uuid`
 - tombstones: `entry_tombstones`
+- local operation queue: `sync_outbox`
+- applied operation log: `applied_ops`
 - sync metadata: `entry_sync_state`
 - snapshot hash: `sync_state.entry_snapshot_hash`
+- search index: `entry_search` with insert/update/delete triggers
 
 The bundled seed currently contains the migrated ME inventory data and is the source used for first-run local cache creation. It is not the live installed database once the app is packaged and launched.
 
@@ -137,7 +140,7 @@ The app keeps compatibility with old DB names and schema names:
 - old shared DB: `<shared root>\shared\me_lab_shared.db`
 - old schema/table names such as `equipment`, `record_id`, and `record_uuid`
 
-On startup, when a new DB is missing but an old DB exists, the app copies the old DB to the new filename, migrates the copy to the entry schema, sets `PRAGMA user_version = 1`, and leaves the old DB in place as a compatibility backup.
+On startup, when a new DB is missing but an old DB exists, the app copies the old DB to the new filename, migrates the copy to the entry schema, sets `PRAGMA user_version = 2`, and leaves the old DB in place as a compatibility backup. Schema v2 is a hard cutover for the current app line.
 
 ### Shared Workspace
 
@@ -153,24 +156,25 @@ The desktop bridge reports shared state through `InventorySharedStatus`:
 - `canModify`: whether entry actions should be enabled
 - `mutationMode`: `shared` or `local`
 - `hasLocalOnlyChanges`: whether the local cache has unsynced local writes
-- `revision`: current numeric sync revision
+- `revision`: current applied operation count
 
-When shared storage is available, mutations write to the shared DB first, then refresh the local cache from shared.
+Entry actions are local-first. Add, edit, verified, archive, restore, and delete actions write to the local DB and enqueue a row-level sync operation before the UI reports completion.
 
-When shared storage is unavailable or unconfigured, the app stays editable. Add, edit, verified, archive, restore, and delete actions write to the local DB, increment local `sync_state.revision`, and show local-only status copy such as:
+When shared storage is unavailable, busy, or unconfigured, the app stays editable and keeps local operations in `sync_outbox`. Status copy includes messages such as:
 
 - `Shared workspace unavailable. Saving changes locally.`
-- `Entry added locally.`
-- `Entry updated locally.`
-- `Verified state updated locally.`
+- `Entry added locally. Sync pending.`
+- `Entry updated locally. Sync pending.`
+- `Verified state updated locally. Sync pending.`
 
-When shared storage becomes available again, sync compares local and shared numeric revisions:
+When shared storage becomes available again, sync pushes pending local operations to shared and pulls any shared operations not yet applied locally:
 
-- if local revision is newer, local DB is copied to shared
-- if shared revision is newer or equal, shared DB is copied to local
-- no conflict UI is implemented; revision wins
+- operations are idempotent by `op_id`
+- deletes are represented by `entry_tombstones`
+- conflicts use last-write-wins by mutation timestamp and operation id
+- conflict details are logged in `sync_conflicts`; no conflict UI is implemented
 
-Idle shared syncs are read-only when local and shared revisions have not changed. The app does not rewrite either SQLite file, reload all entries, or repaint the table unless the shared or local entry data actually changes.
+Idle shared syncs are read-only when no operations are pending or missing. The app does not rewrite either SQLite file, reload all entries, or repaint the table unless shared or local entry data actually changes.
 
 ## Shared Updates
 
@@ -180,7 +184,7 @@ The desktop app checks the shared update manifest at:
 
 When the manifest advertises a newer version than the running app, a blue `Update available` button appears beside the `ME Inventory` title. Clicking it copies the installer to the local app data update cache in the background and verifies the manifest SHA-256. Update manifests must include a valid 64-character hex `sha256`; manifests without one are rejected. After the download is verified, the button changes to `Install update`; clicking it opens the normal visible installer without closing the app first. The installer handles any running-app close prompt and can reopen the app from its finish page.
 
-The shared manifest points at the current release installer. Users stuck on a broken older updater, or on a higher reset version such as `0.9.7` or `0.9.8`, should run the shared `0.9.6` installer manually once to move onto the fixed release line.
+The shared manifest points at the current release installer. Users on `0.9.6` can update to `0.9.7` through the normal update prompt or by running the `0.9.7` installer manually from the release folder.
 
 ## Excel Export
 
@@ -287,13 +291,13 @@ Current packaging notes:
 - packaged product name: `ME Inventory`
 - app id: `com.syedhassaan.me-inventory`
 - package name: `me-inventory`
-- version: `0.9.6`
+- version: `0.9.7`
 - the database is included through `extraResources`
 - the app, installer, and executable use `electron/assets/app_icon.ico`
 
 Typical packaged output:
 
-- `release/ME Inventory Setup 0.9.6.exe`
+- `release/ME Inventory Setup 0.9.7.exe`
 
 ## Repository Layout
 
