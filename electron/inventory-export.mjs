@@ -217,10 +217,20 @@ function loadImportIssueRows(runtimeContext) {
   const db = new DatabaseSync(dbPath, { readOnly: true });
 
   try {
+    if (!tableExists(db, "import_issues")) {
+      return [];
+    }
     return db.prepare(SELECT_IMPORT_ISSUES_SQL).all();
   } finally {
     db.close();
   }
+}
+
+function tableExists(db, tableName) {
+  const row = db
+    .prepare("SELECT name FROM sqlite_schema WHERE type IN ('table', 'view') AND name = ? LIMIT 1")
+    .get(tableName);
+  return Boolean(row);
 }
 
 function buildInventorySheet(worksheet, rows) {

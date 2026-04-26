@@ -137,6 +137,71 @@ describe("shared updater", () => {
     expect(fs.existsSync(path.join(userDataPath, "updates", "0.9.6", path.basename(installerPath)))).toBe(true);
   });
 
+  it("rejects manifests without a SHA-256 checksum before downloading", async () => {
+    writeSharedInstaller("releases/0.9.6/ME_Lab_Inventory_Setup.exe", "installer-content");
+    writeManifest({
+      installer_path: "releases/0.9.6/ME_Lab_Inventory_Setup.exe",
+      version: "0.9.6",
+    });
+    const downloadInstaller = vi.fn();
+
+    const updater = updaterModule.createSharedUpdater({
+      currentVersion: "0.9.5",
+      downloadInstaller,
+      executablePath: process.execPath,
+      userDataPath,
+    });
+
+    const result = await updater.downloadUpdate();
+    expect(result.status).toBe("error");
+    expect(result.error).toMatch(/64-character SHA-256/i);
+    expect(downloadInstaller).not.toHaveBeenCalled();
+  });
+
+  it.each(["abc", "g".repeat(64), "a".repeat(63), "a".repeat(65)])(
+    "rejects invalid manifest checksum %s",
+    async (sha256) => {
+      writeSharedInstaller("releases/0.9.6/ME_Lab_Inventory_Setup.exe", "installer-content");
+      writeManifest({
+        installer_path: "releases/0.9.6/ME_Lab_Inventory_Setup.exe",
+        sha256,
+        version: "0.9.6",
+      });
+
+      const updater = updaterModule.createSharedUpdater({
+        currentVersion: "0.9.5",
+        executablePath: process.execPath,
+        userDataPath,
+      });
+
+      const result = await updater.checkForUpdate();
+      expect(result.status).toBe("error");
+      expect(result.error).toMatch(/64-character SHA-256/i);
+    },
+  );
+
+  it("hashes an existing cached installer before reusing it", async () => {
+    const installerPath = writeSharedInstaller("releases/0.9.6/ME_Lab_Inventory_Setup.exe", "installer-content");
+    writeManifest({
+      installer_path: "releases/0.9.6/ME_Lab_Inventory_Setup.exe",
+      sha256: hashText("installer-content"),
+      version: "0.9.6",
+    });
+    const cachedInstallerPath = path.join(userDataPath, "updates", "0.9.6", path.basename(installerPath));
+    fs.mkdirSync(path.dirname(cachedInstallerPath), { recursive: true });
+    fs.writeFileSync(cachedInstallerPath, "tampered-cached-content");
+
+    const updater = updaterModule.createSharedUpdater({
+      currentVersion: "0.9.5",
+      executablePath: process.execPath,
+      userDataPath,
+    });
+
+    const downloaded = await updater.downloadUpdate();
+    expect(downloaded.status).toBe("ready");
+    expect(fs.readFileSync(cachedInstallerPath, "utf8")).toBe("installer-content");
+  });
+
   it("rejects installer paths outside the shared update root", async () => {
     writeManifest({
       installer_path: "..\\outside.exe",
@@ -291,7 +356,11 @@ describe("shared updater", () => {
   }
 });
 
-function fakeSpawnProcess(..._args: unknown[]) {
+function fakeSpawnProcess(command: string, args: string[], options: Record<string, unknown>) {
+  void command;
+  void args;
+  void options;
+
   const child = new EventEmitter() as EventEmitter & { pid: number; unref: () => void };
   child.pid = 4321;
   child.unref = vi.fn();

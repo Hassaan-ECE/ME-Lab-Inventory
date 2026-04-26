@@ -12,6 +12,7 @@ import { SearchCard } from "@/components/inventory/SearchCard";
 import { StatusStrip } from "@/components/inventory/StatusStrip";
 import { Button } from "@/components/ui/button";
 import { MOCK_INVENTORY } from "@/data/mockInventory";
+import { toSafeExternalUrl } from "@/lib/externalUrl";
 import {
   DEFAULT_FILTERS,
   buildDefaultColumnVisibility,
@@ -291,8 +292,11 @@ export function InventoryShell() {
     return operation();
   }
 
-  function getDesktopMutationMessage(sharedMessage: string, localMessage: string): string {
-    return sharedStatus.mutationMode === "local" ? localMessage : sharedMessage;
+  function applyDesktopMutationFeedback(result: { message: string; shared?: InventorySharedStatus }): void {
+    if (result.shared) {
+      setSharedStatus(result.shared);
+    }
+    announceStatus(result.message);
   }
 
   function handleThemeToggle(): void {
@@ -352,11 +356,11 @@ export function InventoryShell() {
 
     if (dataSource === "desktop" && window.inventoryDesktop?.toggleVerifiedEntry && isDatabaseEntryId(entryId)) {
       try {
-        const updatedEntry = await runDesktopMutation(() => window.inventoryDesktop!.toggleVerifiedEntry(entryId, nextVerified));
+        const result = await runDesktopMutation(() => window.inventoryDesktop!.toggleVerifiedEntry(entryId, nextVerified));
         setEntries((current) =>
-          current.map((entry) => (entry.id === entryId ? updatedEntry : entry)),
+          current.map((entry) => (entry.id === entryId ? result.entry : entry)),
         );
-        announceStatus(getDesktopMutationMessage("Verified state updated in the ME Inventory database.", "Verified state updated locally."));
+        applyDesktopMutationFeedback(result);
         return;
       } catch {
         announceStatus("Could not update the ME Inventory database.");
@@ -384,9 +388,9 @@ export function InventoryShell() {
       }
 
       if (dataSource === "desktop" && window.inventoryDesktop?.updateEntry && isDatabaseEntryId(dialogState.entryId)) {
-        const updatedEntry = await runDesktopMutation(() => window.inventoryDesktop!.updateEntry(dialogState.entryId!, input));
-        setEntries((current) => current.map((entry) => (entry.id === updatedEntry.id ? updatedEntry : entry)));
-        announceStatus(getDesktopMutationMessage("Entry updated in the ME Inventory database.", "Entry updated locally."));
+        const result = await runDesktopMutation(() => window.inventoryDesktop!.updateEntry(dialogState.entryId!, input));
+        setEntries((current) => current.map((entry) => (entry.id === result.entry.id ? result.entry : entry)));
+        applyDesktopMutationFeedback(result);
       } else {
         const updatedEntry = buildLocalUpdatedEntry(existingEntry, input);
         setEntries((current) => current.map((entry) => (entry.id === updatedEntry.id ? updatedEntry : entry)));
@@ -398,9 +402,9 @@ export function InventoryShell() {
     }
 
     if (dataSource === "desktop" && window.inventoryDesktop?.createEntry) {
-      const createdEntry = await runDesktopMutation(() => window.inventoryDesktop!.createEntry(input));
-      setEntries((current) => [createdEntry, ...current.filter((entry) => entry.id !== createdEntry.id)]);
-      announceStatus(getDesktopMutationMessage("Entry added to the ME Inventory database.", "Entry added locally."));
+      const result = await runDesktopMutation(() => window.inventoryDesktop!.createEntry(input));
+      setEntries((current) => [result.entry, ...current.filter((entry) => entry.id !== result.entry.id)]);
+      applyDesktopMutationFeedback(result);
     } else {
       const createdEntry = buildLocalCreatedEntry(input);
       setEntries((current) => [createdEntry, ...current]);
@@ -423,8 +427,9 @@ export function InventoryShell() {
 
     if (dataSource === "desktop" && window.inventoryDesktop?.setArchivedEntry && isDatabaseEntryId(entryId)) {
       try {
-        const updatedEntry = await runDesktopMutation(() => window.inventoryDesktop!.setArchivedEntry(entryId, archived));
-        setEntries((current) => current.map((entry) => (entry.id === updatedEntry.id ? updatedEntry : entry)));
+        const result = await runDesktopMutation(() => window.inventoryDesktop!.setArchivedEntry(entryId, archived));
+        setEntries((current) => current.map((entry) => (entry.id === result.entry.id ? result.entry : entry)));
+        applyDesktopMutationFeedback(result);
       } catch {
         announceStatus("Could not update the shared inventory database.");
         return;
@@ -433,9 +438,8 @@ export function InventoryShell() {
       setEntries((current) =>
         current.map((entry) => (entry.id === entryId ? { ...entry, archived, updatedAt: new Date().toISOString() } : entry)),
       );
+      announceStatus(archived ? "Entry moved to the archive." : "Entry restored to inventory.");
     }
-
-    announceStatus(archived ? "Entry moved to the archive." : "Entry restored to inventory.");
   }
 
   function handleRequestDeleteEntry(entryId: string): void {
@@ -457,7 +461,10 @@ export function InventoryShell() {
 
     if (dataSource === "desktop" && window.inventoryDesktop?.deleteEntry && isDatabaseEntryId(entryId)) {
       try {
-        await runDesktopMutation(() => window.inventoryDesktop!.deleteEntry(entryId));
+        const result = await runDesktopMutation(() => window.inventoryDesktop!.deleteEntry(entryId));
+        setEntries((current) => current.filter((entry) => entry.id !== entryId));
+        applyDesktopMutationFeedback(result);
+        return;
       } catch {
         announceStatus("Could not delete from the shared inventory database.");
         return;
@@ -547,7 +554,7 @@ export function InventoryShell() {
       return;
     }
 
-    const externalUrl = normalizeExternalUrl(linkText);
+    const externalUrl = toSafeExternalUrl(linkText);
     if (!externalUrl) {
       announceStatus("This link is not in a valid format.");
       return;
@@ -574,7 +581,13 @@ export function InventoryShell() {
       return;
     }
 
-    const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(queryText)}`;
+    const searchUrl = toSafeExternalUrl(`https://www.google.com/search?q=${encodeURIComponent(queryText)}`, {
+      allowImplicitHttps: false,
+    });
+    if (!searchUrl) {
+      announceStatus("Could not build a safe browser search URL.");
+      return;
+    }
     const opened = await openExternalUrl(searchUrl);
     if (!opened) {
       announceStatus("Could not open the browser for this search.");
@@ -875,29 +888,17 @@ function isDatabaseEntryId(entryId: string): boolean {
 }
 
 async function openExternalUrl(url: string): Promise<boolean> {
+  const externalUrl = toSafeExternalUrl(url, { allowImplicitHttps: false });
+  if (!externalUrl) {
+    return false;
+  }
+
   if (window.inventoryDesktop?.openExternal) {
-    return window.inventoryDesktop.openExternal(url);
+    return window.inventoryDesktop.openExternal(externalUrl);
   }
 
-  window.open(url, "_blank", "noopener,noreferrer");
+  window.open(externalUrl, "_blank", "noopener,noreferrer");
   return true;
-}
-
-function normalizeExternalUrl(value: string): string | null {
-  const trimmed = value.trim();
-  if (!trimmed) {
-    return null;
-  }
-
-  try {
-    return new URL(trimmed).toString();
-  } catch {
-    try {
-      return new URL(`https://${trimmed}`).toString();
-    } catch {
-      return null;
-    }
-  }
 }
 
 function buildLocalCreatedEntry(input: InventoryEntryInput): InventoryEntry {

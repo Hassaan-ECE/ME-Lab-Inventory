@@ -3,6 +3,8 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { InventoryShell } from "@/components/inventory/InventoryShell";
+import { InventoryTable } from "@/components/inventory/InventoryTable";
+import { INVENTORY_COLUMNS, type InventoryEntry } from "@/types/inventory";
 
 describe("InventoryShell table controls", () => {
   beforeEach(() => {
@@ -14,6 +16,43 @@ describe("InventoryShell table controls", () => {
     render(<InventoryShell />);
 
     expect(screen.getByText("www.cejn.com/en-us/products/thermal-control")).toBeInTheDocument();
+  });
+
+  it("renders unsafe link values as inert text instead of anchors", () => {
+    const unsafeEntry: InventoryEntry = {
+      archived: false,
+      assetNumber: "ME-UNSAFE",
+      description: "Unsafe link entry",
+      id: "unsafe-1",
+      links: "javascript:alert(1)",
+      lifecycleStatus: "active",
+      location: "Bench",
+      manufacturer: "Acme",
+      model: "Unsafe",
+      notes: "",
+      projectName: "Security",
+      qty: 1,
+      updatedAt: "2026-04-25T12:00:00.000Z",
+      verifiedInSurvey: false,
+      workingStatus: "working",
+    };
+
+    render(
+      <InventoryTable
+        canModifyEntries
+        colorRows={false}
+        columns={INVENTORY_COLUMNS}
+        entries={[unsafeEntry]}
+        sortState={{ column: "manufacturer", direction: "asc" }}
+        onOpenContextMenu={() => undefined}
+        onOpenEntry={() => undefined}
+        onSortChange={() => undefined}
+        onToggleVerified={() => undefined}
+      />,
+    );
+
+    expect(screen.getByText("javascript:alert(1)")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "javascript:alert(1)" })).not.toBeInTheDocument();
   });
 
   it("hides a selected column from the table", async () => {

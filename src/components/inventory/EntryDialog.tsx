@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { toSafeExternalUrl } from "@/lib/externalUrl";
 import { cn } from "@/lib/utils";
 import {
   LIFECYCLE_OPTIONS,
@@ -800,7 +801,7 @@ async function openPictureTarget(targetPath: string): Promise<boolean> {
     return false;
   }
 
-  const externalUrl = normalizeExternalUrl(trimmedTargetPath);
+  const externalUrl = toSafeExternalUrl(trimmedTargetPath);
   if (externalUrl) {
     if (window.inventoryDesktop?.openExternal) {
       return window.inventoryDesktop.openExternal(externalUrl);
@@ -815,25 +816,4 @@ async function openPictureTarget(targetPath: string): Promise<boolean> {
   }
 
   return false;
-}
-
-function normalizeExternalUrl(value: string): string | null {
-  const trimmedValue = value.trim();
-  if (!trimmedValue) {
-    return null;
-  }
-
-  if (/^(?:[a-zA-Z]:[\\/]|\\\\)/.test(trimmedValue)) {
-    return null;
-  }
-
-  try {
-    return new URL(trimmedValue).toString();
-  } catch {
-    try {
-      return new URL(`https://${trimmedValue}`).toString();
-    } catch {
-      return null;
-    }
-  }
 }

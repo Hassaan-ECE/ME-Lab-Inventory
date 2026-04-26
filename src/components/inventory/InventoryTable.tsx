@@ -4,6 +4,7 @@ import type { CSSProperties } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
+import { toSafeExternalUrl } from "@/lib/externalUrl";
 import { formatLinkLabel } from "@/lib/inventory";
 import type { ColumnConfig, InventoryEntry, SortState } from "@/types/inventory";
 
@@ -153,12 +154,16 @@ function renderCell(
       if (!label) {
         return renderText("");
       }
+      const safeUrl = toSafeExternalUrl(entry.links);
+      if (!safeUrl) {
+        return renderText(entry.links.trim());
+      }
       return (
         <a
           className="inline-block max-w-full truncate font-mono text-xs text-foreground underline decoration-border underline-offset-4 transition-colors hover:text-primary"
-          href={entry.links}
+          href={safeUrl}
           rel="noreferrer"
-          title={entry.links}
+          title={safeUrl}
           target="_blank"
         >
           {label}

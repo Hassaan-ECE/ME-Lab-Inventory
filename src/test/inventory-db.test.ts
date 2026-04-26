@@ -7,7 +7,12 @@ import { pathToFileURL } from "node:url";
 import { DatabaseSync } from "node:sqlite";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import type { InventoryEntry, InventoryEntryInput } from "@/types/inventory";
+import type {
+  InventoryDeleteMutationResult,
+  InventoryEntry,
+  InventoryEntryInput,
+  InventoryEntryMutationResult,
+} from "@/types/inventory";
 
 const PROJECT_DB_PATH = path.resolve("data", "me_lab_inventory.db");
 
@@ -19,27 +24,31 @@ interface RuntimeContext {
 }
 
 interface InventoryDbModule {
-  createInventoryEntry: (runtimeContext: RuntimeContext, entryInput: InventoryEntryInput) => InventoryEntry;
-  deleteInventoryEntry: (runtimeContext: RuntimeContext, entryId: string) => { entryId: string };
+  createInventoryEntry: (runtimeContext: RuntimeContext, entryInput: InventoryEntryInput) => InventoryEntryMutationResult;
+  deleteInventoryEntry: (runtimeContext: RuntimeContext, entryId: string) => InventoryDeleteMutationResult;
   loadInventoryEntries: (runtimeContext: RuntimeContext) => {
     dbPath: string;
     entries: InventoryEntry[];
     entriesChanged?: boolean;
     shared: { canModify: boolean; hasLocalOnlyChanges?: boolean; message: string; mutationMode?: "shared" | "local" };
   };
-  setArchivedEntry: (runtimeContext: RuntimeContext, entryId: string, archived: boolean) => InventoryEntry;
+  setArchivedEntry: (runtimeContext: RuntimeContext, entryId: string, archived: boolean) => InventoryEntryMutationResult;
   syncInventoryWithShared: (runtimeContext: RuntimeContext) => {
     dbPath: string;
     entries: InventoryEntry[];
     entriesChanged?: boolean;
     shared: { canModify: boolean; hasLocalOnlyChanges?: boolean; mutationMode?: "shared" | "local"; sharedDbPath?: string };
   };
-  toggleVerifiedEntry: (runtimeContext: RuntimeContext, entryId: string, nextVerified: boolean) => InventoryEntry;
+  toggleVerifiedEntry: (
+    runtimeContext: RuntimeContext,
+    entryId: string,
+    nextVerified: boolean,
+  ) => InventoryEntryMutationResult;
   updateInventoryEntry: (
     runtimeContext: RuntimeContext,
     entryId: string,
     entryInput: InventoryEntryInput,
-  ) => InventoryEntry;
+  ) => InventoryEntryMutationResult;
 }
 
 describe("inventory desktop database mutations", () => {
@@ -85,7 +94,7 @@ describe("inventory desktop database mutations", () => {
 
     const initialEntries = loaded.entries.length;
 
-    const created = inventoryDb.createInventoryEntry(runtimeContext, {
+    const createdResult = inventoryDb.createInventoryEntry(runtimeContext, {
       archived: false,
       assetNumber: "ME-9999",
       assignedTo: "ME Team",
@@ -104,12 +113,15 @@ describe("inventory desktop database mutations", () => {
       verifiedInSurvey: false,
       workingStatus: "working",
     });
+    const created = createdResult.entry;
 
+    expect(createdResult.mutationMode).toBe("shared");
+    expect(createdResult.message).toBe("Entry added to the ME Inventory database.");
     expect(created.description).toBe("Desktop CRUD test entry");
     expect(created.picturePath).toBe("C:\\Pictures\\fixture-plate.jpg");
     expect(inventoryDb.loadInventoryEntries(runtimeContext).entries).toHaveLength(initialEntries + 1);
 
-    const updated = inventoryDb.updateInventoryEntry(runtimeContext, created.id, {
+    const updatedResult = inventoryDb.updateInventoryEntry(runtimeContext, created.id, {
       ...created,
       archived: false,
       assignedTo: created.assignedTo ?? "",
@@ -118,15 +130,21 @@ describe("inventory desktop database mutations", () => {
       qty: 7,
       serialNumber: created.serialNumber ?? "",
     });
+    const updated = updatedResult.entry;
 
+    expect(updatedResult.mutationMode).toBe("shared");
     expect(updated.qty).toBe(7);
     expect(updated.condition).toBe("Updated");
     expect(updated.picturePath).toBe("C:\\Pictures\\fixture-plate-updated.jpg");
 
-    const verified = inventoryDb.toggleVerifiedEntry(runtimeContext, created.id, true);
+    const verifiedResult = inventoryDb.toggleVerifiedEntry(runtimeContext, created.id, true);
+    const verified = verifiedResult.entry;
+    expect(verifiedResult.message).toBe("Verified state updated in the ME Inventory database.");
     expect(verified.verifiedInSurvey).toBe(true);
 
-    const archived = inventoryDb.setArchivedEntry(runtimeContext, created.id, true);
+    const archivedResult = inventoryDb.setArchivedEntry(runtimeContext, created.id, true);
+    const archived = archivedResult.entry;
+    expect(archivedResult.message).toBe("Entry moved to the archive.");
     expect(archived.archived).toBe(true);
 
     const deletion = inventoryDb.deleteInventoryEntry(runtimeContext, created.id);
@@ -218,7 +236,7 @@ describe("inventory desktop database mutations", () => {
     expect(loaded.shared.canModify).toBe(true);
     expect(loaded.shared.mutationMode).toBe("local");
 
-    const created = inventoryDb.createInventoryEntry(runtimeContext, {
+    const createdResult = inventoryDb.createInventoryEntry(runtimeContext, {
       archived: false,
       assetNumber: "ME-OFFLINE",
       assignedTo: "",
@@ -236,8 +254,9 @@ describe("inventory desktop database mutations", () => {
       verifiedInSurvey: false,
       workingStatus: "unknown",
     });
+    const created = createdResult.entry;
 
-    const updated = inventoryDb.updateInventoryEntry(runtimeContext, created.id, {
+    const updatedResult = inventoryDb.updateInventoryEntry(runtimeContext, created.id, {
       ...created,
       archived: false,
       assignedTo: created.assignedTo ?? "",
@@ -246,12 +265,21 @@ describe("inventory desktop database mutations", () => {
       qty: 4,
       serialNumber: created.serialNumber ?? "",
     });
-    const verified = inventoryDb.toggleVerifiedEntry(runtimeContext, created.id, true);
-    const archived = inventoryDb.setArchivedEntry(runtimeContext, created.id, true);
+    const updated = updatedResult.entry;
+    const verifiedResult = inventoryDb.toggleVerifiedEntry(runtimeContext, created.id, true);
+    const verified = verifiedResult.entry;
+    const archivedResult = inventoryDb.setArchivedEntry(runtimeContext, created.id, true);
+    const archived = archivedResult.entry;
 
+    expect(createdResult.mutationMode).toBe("local");
+    expect(createdResult.message).toBe("Entry added locally.");
+    expect(createdResult.shared?.hasLocalOnlyChanges).toBe(true);
     expect(created.description).toBe("Offline mutation");
+    expect(updatedResult.mutationMode).toBe("local");
     expect(updated.location).toBe("Offline Shelf");
+    expect(verifiedResult.message).toBe("Verified state updated locally.");
     expect(verified.verifiedInSurvey).toBe(true);
+    expect(archivedResult.message).toBe("Entry moved to the archive locally.");
     expect(archived.archived).toBe(true);
     expect(getDbRevision(localDbPath)).toBeGreaterThan(initialRevision);
 
@@ -261,6 +289,7 @@ describe("inventory desktop database mutations", () => {
 
     const deletion = inventoryDb.deleteInventoryEntry(runtimeContext, created.id);
     expect(deletion.entryId).toBe(created.id);
+    expect(deletion.message).toBe("Entry deleted locally.");
     expect(inventoryDb.loadInventoryEntries(runtimeContext).entries.some((entry) => entry.id === created.id)).toBe(false);
   });
 
@@ -269,7 +298,7 @@ describe("inventory desktop database mutations", () => {
     process.env.ME_LAB_SHARED_ROOT = missingSharedRoot;
     const runtimeContext = buildRuntimeContext(tempDir);
 
-    const created = inventoryDb.createInventoryEntry(runtimeContext, {
+    const createdResult = inventoryDb.createInventoryEntry(runtimeContext, {
       archived: false,
       assetNumber: "ME-RECONNECT",
       assignedTo: "",
@@ -287,6 +316,7 @@ describe("inventory desktop database mutations", () => {
       verifiedInSurvey: false,
       workingStatus: "working",
     });
+    const created = createdResult.entry;
 
     fs.mkdirSync(missingSharedRoot, { recursive: true });
     const syncResult = inventoryDb.syncInventoryWithShared(runtimeContext);

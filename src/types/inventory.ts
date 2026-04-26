@@ -65,6 +65,22 @@ export interface InventorySharedStatus {
   syncIntervalMs?: number;
 }
 
+export type InventoryMutationMode = "shared" | "local";
+
+export interface InventoryEntryMutationResult {
+  entry: InventoryEntry;
+  message: string;
+  mutationMode: InventoryMutationMode;
+  shared?: InventorySharedStatus;
+}
+
+export interface InventoryDeleteMutationResult {
+  entryId: string;
+  message: string;
+  mutationMode: InventoryMutationMode;
+  shared?: InventorySharedStatus;
+}
+
 export type UpdateStatus =
   | "idle"
   | "checking"

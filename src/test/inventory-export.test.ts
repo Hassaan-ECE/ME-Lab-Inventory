@@ -118,6 +118,25 @@ describe("inventory Excel export", () => {
     expect(getSummaryValue(summarySheet, "Master List")).toBe("Machine Shop Material list.xlsx");
   });
 
+  it("exports with an empty import issues sheet when the optional table is missing", async () => {
+    const outputPath = path.join(tempDir, "ME_Inventory_No_Issues_Table.xlsx");
+    const workbook = new ExcelJS.Workbook();
+    const db = new DatabaseSync(path.join(tempDir, "data", "me_inventory.db"));
+    try {
+      db.exec("DROP TABLE import_issues");
+    } finally {
+      db.close();
+    }
+
+    await exportModule.writeInventoryWorkbook(runtimeContext, outputPath);
+    await workbook.xlsx.readFile(outputPath);
+
+    const issueSheet = workbook.getWorksheet("Import Issues");
+    expect(issueSheet).toBeDefined();
+    expect(issueSheet?.rowCount).toBe(1);
+    expect(issueSheet?.getRow(1).values).toContain("Summary");
+  });
+
   it("returns a canceled result when the save dialog is dismissed", async () => {
     const showSaveDialog = vi.fn().mockResolvedValue({ canceled: true });
 

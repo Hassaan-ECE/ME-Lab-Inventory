@@ -147,6 +147,70 @@ describe("InventoryShell entry actions", () => {
 
     expect(screen.getByRole("button", { name: "Open Saved Link" })).toBeInTheDocument();
   });
+
+  it("does not open unsafe saved-link schemes", async () => {
+    const user = userEvent.setup();
+    const openExternal = vi.fn().mockResolvedValue(true);
+    const unsafeEntry = {
+      archived: false,
+      assetNumber: "ME-UNSAFE",
+      description: "Unsafe saved link entry",
+      id: "501",
+      links: "javascript:alert(1)",
+      lifecycleStatus: "active" as const,
+      location: "Bench",
+      manufacturer: "Acme",
+      model: "Unsafe",
+      notes: "",
+      projectName: "Security",
+      qty: 1,
+      updatedAt: "2026-04-25T12:00:00.000Z",
+      verifiedInSurvey: false,
+      workingStatus: "working" as const,
+    };
+    window.inventoryDesktop = {
+      isDesktop: true,
+      loadInventory: vi.fn().mockResolvedValue({
+        dbPath: "D:/coding/ME Inventory/data/me_inventory.db",
+        entries: [unsafeEntry],
+        shared: {
+          available: true,
+          canModify: true,
+          enabled: true,
+          message: "",
+          mutationMode: "shared",
+        },
+      }),
+      syncInventory: vi.fn().mockResolvedValue({
+        dbPath: "D:/coding/ME Inventory/data/me_inventory.db",
+        entries: [unsafeEntry],
+        shared: {
+          available: true,
+          canModify: true,
+          enabled: true,
+          message: "",
+          mutationMode: "shared",
+        },
+      }),
+      toggleVerifiedEntry: vi.fn(),
+      createEntry: vi.fn(),
+      updateEntry: vi.fn(),
+      setArchivedEntry: vi.fn(),
+      deleteEntry: vi.fn(),
+      openExternal,
+      openPath: vi.fn().mockResolvedValue(true),
+      pickPicturePath: vi.fn().mockResolvedValue(null),
+      exportExcel: vi.fn().mockResolvedValue({ canceled: false, outputPath: "D:/exports/ME_Inventory_Export.xlsx" }),
+    };
+
+    render(<InventoryShell />);
+
+    fireEvent.contextMenu(await screen.findByText("Unsafe saved link entry"));
+    await user.click(await screen.findByRole("button", { name: "Open Saved Link" }));
+
+    expect(openExternal).not.toHaveBeenCalled();
+    expect(screen.getByText("This link is not in a valid format.")).toBeInTheDocument();
+  });
 });
 
 function mockMatchMedia(matches: boolean) {

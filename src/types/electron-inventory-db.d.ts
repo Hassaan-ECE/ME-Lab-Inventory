@@ -1,5 +1,11 @@
 declare module "../../electron/inventory-db.mjs" {
-  import type { InventoryEntry, InventoryEntryInput, InventorySharedStatus } from "@/types/inventory";
+  import type {
+    InventoryDeleteMutationResult,
+    InventoryEntry,
+    InventoryEntryInput,
+    InventoryEntryMutationResult,
+    InventorySharedStatus,
+  } from "@/types/inventory";
 
   interface InventorySyncResult {
     dbPath: string;
@@ -22,28 +28,28 @@ declare module "../../electron/inventory-db.mjs" {
   export function createInventoryEntry(
     runtimeContext: RuntimeContext,
     entryInput: InventoryEntryInput,
-  ): InventoryEntry;
+  ): InventoryEntryMutationResult;
 
   export function updateInventoryEntry(
     runtimeContext: RuntimeContext,
     entryId: string,
     entryInput: InventoryEntryInput,
-  ): InventoryEntry;
+  ): InventoryEntryMutationResult;
 
   export function toggleVerifiedEntry(
     runtimeContext: RuntimeContext,
     entryId: string,
     nextVerified: boolean,
-  ): InventoryEntry;
+  ): InventoryEntryMutationResult;
 
   export function setArchivedEntry(
     runtimeContext: RuntimeContext,
     entryId: string,
     archived: boolean,
-  ): InventoryEntry;
+  ): InventoryEntryMutationResult;
 
   export function deleteInventoryEntry(
     runtimeContext: RuntimeContext,
     entryId: string,
-  ): { entryId: string };
+  ): InventoryDeleteMutationResult;
 }

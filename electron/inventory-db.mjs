@@ -173,7 +173,7 @@ export function createInventoryEntry(runtimeContext, entryInput) {
 
   validateEntryInput(entry);
 
-  runEntryMutationWithSharedFallback(dbPath, (db) => {
+  const mutation = runEntryMutationWithSharedFallback(dbPath, (db) => {
     db.prepare(
       `
         INSERT INTO entries (
@@ -224,14 +224,22 @@ export function createInventoryEntry(runtimeContext, entryInput) {
     );
   });
 
-  return selectEntryByUuidFromPath(dbPath, entryUuid);
+  return buildEntryMutationResult({
+    dbPath,
+    entry: selectEntryByUuidFromPath(dbPath, entryUuid),
+    messages: {
+      local: "Entry added locally.",
+      shared: "Entry added to the ME Inventory database.",
+    },
+    mutation,
+  });
 }
 
 export function toggleVerifiedEntry(runtimeContext, entryId, nextVerified) {
   const dbPath = resolveDbPath(runtimeContext);
   const selector = resolveEntrySelector(dbPath, entryId);
 
-  runEntryMutationWithSharedFallback(dbPath, (db) => {
+  const mutation = runEntryMutationWithSharedFallback(dbPath, (db) => {
     db.prepare(
       `
         UPDATE entries
@@ -241,7 +249,15 @@ export function toggleVerifiedEntry(runtimeContext, entryId, nextVerified) {
     ).run(nextVerified ? 1 : 0, selector.value);
   });
 
-  return selectEntryBySelectorFromPath(dbPath, selector);
+  return buildEntryMutationResult({
+    dbPath,
+    entry: selectEntryBySelectorFromPath(dbPath, selector),
+    messages: {
+      local: "Verified state updated locally.",
+      shared: "Verified state updated in the ME Inventory database.",
+    },
+    mutation,
+  });
 }
 
 export function updateInventoryEntry(runtimeContext, entryId, entryInput) {
@@ -251,7 +267,7 @@ export function updateInventoryEntry(runtimeContext, entryId, entryInput) {
 
   validateEntryInput(entry);
 
-  runEntryMutationWithSharedFallback(dbPath, (db) => {
+  const mutation = runEntryMutationWithSharedFallback(dbPath, (db) => {
     db.prepare(
       `
         UPDATE entries
@@ -300,14 +316,22 @@ export function updateInventoryEntry(runtimeContext, entryId, entryInput) {
     );
   });
 
-  return selectEntryBySelectorFromPath(dbPath, selector);
+  return buildEntryMutationResult({
+    dbPath,
+    entry: selectEntryBySelectorFromPath(dbPath, selector),
+    messages: {
+      local: "Entry updated locally.",
+      shared: "Entry updated in the ME Inventory database.",
+    },
+    mutation,
+  });
 }
 
 export function setArchivedEntry(runtimeContext, entryId, archived) {
   const dbPath = resolveDbPath(runtimeContext);
   const selector = resolveEntrySelector(dbPath, entryId);
 
-  runEntryMutationWithSharedFallback(dbPath, (db) => {
+  const mutation = runEntryMutationWithSharedFallback(dbPath, (db) => {
     db.prepare(
       `
         UPDATE entries
@@ -317,18 +341,39 @@ export function setArchivedEntry(runtimeContext, entryId, archived) {
     ).run(archived ? 1 : 0, selector.value);
   });
 
-  return selectEntryBySelectorFromPath(dbPath, selector);
+  return buildEntryMutationResult({
+    dbPath,
+    entry: selectEntryBySelectorFromPath(dbPath, selector),
+    messages: archived
+      ? {
+          local: "Entry moved to the archive locally.",
+          shared: "Entry moved to the archive.",
+        }
+      : {
+          local: "Entry restored to inventory locally.",
+          shared: "Entry restored to inventory.",
+        },
+    mutation,
+  });
 }
 
 export function deleteInventoryEntry(runtimeContext, entryId) {
   const dbPath = resolveDbPath(runtimeContext);
   const selector = resolveEntrySelector(dbPath, entryId);
 
-  runEntryMutationWithSharedFallback(dbPath, (db) => {
+  const mutation = runEntryMutationWithSharedFallback(dbPath, (db) => {
     db.prepare(`DELETE FROM entries WHERE ${selector.whereSql}`).run(selector.value);
   });
 
-  return { entryId: String(entryId) };
+  return buildDeleteMutationResult({
+    dbPath,
+    entryId,
+    messages: {
+      local: "Entry deleted locally.",
+      shared: "Entry deleted.",
+    },
+    mutation,
+  });
 }
 
 function loadInventoryEntriesFromPath(dbPath) {
@@ -356,6 +401,40 @@ function runEntryMutationWithSharedFallback(localDbPath, mutate) {
     runLocalMutation(localDbPath, mutate);
     return { mutationMode: "local", sharedDbPath: resolveSharedDbPath() };
   }
+}
+
+function buildEntryMutationResult({ dbPath, entry, messages, mutation }) {
+  return {
+    entry,
+    message: messages[mutation.mutationMode],
+    mutationMode: mutation.mutationMode,
+    shared: buildMutationSharedStatus(dbPath, mutation),
+  };
+}
+
+function buildDeleteMutationResult({ dbPath, entryId, messages, mutation }) {
+  return {
+    entryId: String(entryId),
+    message: messages[mutation.mutationMode],
+    mutationMode: mutation.mutationMode,
+    shared: buildMutationSharedStatus(dbPath, mutation),
+  };
+}
+
+function buildMutationSharedStatus(dbPath, mutation) {
+  if (mutation.mutationMode === "local") {
+    return buildLocalSharedStatus(SHARED_UNAVAILABLE_MESSAGE, dbPath);
+  }
+
+  const revisionInfo = getRevisionInfo(mutation.sharedDbPath);
+  return buildSharedStatus({
+    available: true,
+    canModify: true,
+    message: SHARED_CONNECTED_MESSAGE,
+    mutationMode: "shared",
+    revision: revisionInfo.revision,
+    sharedDbPath: mutation.sharedDbPath,
+  });
 }
 
 function ensureSharedDatabase(localDbPath) {

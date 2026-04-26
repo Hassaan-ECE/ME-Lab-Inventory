@@ -27,6 +27,9 @@ async function run() {
   if (!sourcePath || !outputPath) {
     throw new Error("Update download worker is missing a source or output path.");
   }
+  if (!/^[a-f0-9]{64}$/.test(expectedHash)) {
+    throw new Error("Update download requires a valid SHA-256 checksum.");
+  }
   if (!fs.existsSync(sourcePath)) {
     throw new Error("Update installer could not be found on the shared drive.");
   }
@@ -62,7 +65,7 @@ async function run() {
 async function copyInstallerToTempFile({ expectedHash, sourcePath, tempPath }) {
   const sourceStats = await fsp.stat(sourcePath);
   const totalBytes = sourceStats.size;
-  const hash = expectedHash ? createHash("sha256") : null;
+  const hash = createHash("sha256");
   let copiedBytes = 0;
   let lastProgressAt = 0;
   let lastProgress = 0;
@@ -72,7 +75,7 @@ async function copyInstallerToTempFile({ expectedHash, sourcePath, tempPath }) {
   const readStream = fs.createReadStream(sourcePath);
   readStream.on("data", (chunk) => {
     copiedBytes += chunk.length;
-    hash?.update(chunk);
+    hash.update(chunk);
 
     const now = Date.now();
     const progress = totalBytes > 0 ? copiedBytes / totalBytes : 1;
@@ -87,10 +90,6 @@ async function copyInstallerToTempFile({ expectedHash, sourcePath, tempPath }) {
   });
 
   await pipeline(readStream, fs.createWriteStream(tempPath));
-
-  if (!expectedHash) {
-    return;
-  }
 
   postProgress("verifying", 1);
   const actualHash = hash.digest("hex");
@@ -110,10 +109,6 @@ function buildDownloadResult({ expectedHash, outputPath, outputStats, reused }) 
 }
 
 async function installerMatchesExpectedHash(installerPath, expectedHash) {
-  if (!expectedHash) {
-    return true;
-  }
-
   return (await hashFile(installerPath)) === expectedHash;
 }
 

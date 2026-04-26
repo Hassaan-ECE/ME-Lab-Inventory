@@ -1,4 +1,11 @@
-import type { InventoryEntry, InventoryEntryInput, InventorySharedStatus, UpdateState } from "@/types/inventory";
+import type {
+  InventoryDeleteMutationResult,
+  InventoryEntry,
+  InventoryEntryInput,
+  InventoryEntryMutationResult,
+  InventorySharedStatus,
+  UpdateState,
+} from "@/types/inventory";
 
 export interface InventorySyncResult {
   dbPath: string;
@@ -13,11 +20,11 @@ declare global {
       isDesktop: boolean;
       loadInventory: () => Promise<InventorySyncResult>;
       syncInventory: () => Promise<InventorySyncResult>;
-      toggleVerifiedEntry: (entryId: string, nextVerified: boolean) => Promise<InventoryEntry>;
-      createEntry: (input: InventoryEntryInput) => Promise<InventoryEntry>;
-      updateEntry: (entryId: string, input: InventoryEntryInput) => Promise<InventoryEntry>;
-      setArchivedEntry: (entryId: string, archived: boolean) => Promise<InventoryEntry>;
-      deleteEntry: (entryId: string) => Promise<{ entryId: string }>;
+      toggleVerifiedEntry: (entryId: string, nextVerified: boolean) => Promise<InventoryEntryMutationResult>;
+      createEntry: (input: InventoryEntryInput) => Promise<InventoryEntryMutationResult>;
+      updateEntry: (entryId: string, input: InventoryEntryInput) => Promise<InventoryEntryMutationResult>;
+      setArchivedEntry: (entryId: string, archived: boolean) => Promise<InventoryEntryMutationResult>;
+      deleteEntry: (entryId: string) => Promise<InventoryDeleteMutationResult>;
       openExternal: (url: string) => Promise<boolean>;
       openPath: (path: string) => Promise<boolean>;
       pickPicturePath: () => Promise<string | null>;

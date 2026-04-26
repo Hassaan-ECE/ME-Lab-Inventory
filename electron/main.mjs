@@ -16,6 +16,7 @@ import {
 import { exportExcelInventory } from "./inventory-export.mjs";
 import { resolveSharedDbPath, resolveSharedDirectoryPath } from "./inventory-runtime.mjs";
 import { createSharedUpdater } from "./updater.mjs";
+import { isSafeExternalUrl } from "../shared/external-url.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -57,7 +58,7 @@ function createMainWindow() {
   });
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    void shell.openExternal(url);
+    void openSafeExternalUrl(url);
     return { action: "deny" };
   });
 
@@ -70,7 +71,7 @@ function createMainWindow() {
     }
 
     event.preventDefault();
-    void shell.openExternal(url);
+    void openSafeExternalUrl(url);
   });
 
   if (devServerUrl) {
@@ -92,6 +93,20 @@ function createMainWindow() {
 
 function buildAppDisplayName() {
   return `ME Inventory v${app.getVersion()}`;
+}
+
+async function openSafeExternalUrl(url) {
+  const externalUrl = String(url ?? "");
+  if (!isSafeExternalUrl(externalUrl, { allowImplicitHttps: false })) {
+    return false;
+  }
+
+  try {
+    await shell.openExternal(externalUrl);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function getSharedUpdater() {
@@ -165,7 +180,7 @@ app.whenReady().then(() => {
   ipcMain.handle("inventory:delete-entry", (_event, entryId) =>
     deleteInventoryEntry(buildRuntimeContext(), entryId),
   );
-  ipcMain.handle("inventory:open-external", (_event, url) => shell.openExternal(url));
+  ipcMain.handle("inventory:open-external", (_event, url) => openSafeExternalUrl(url));
   ipcMain.handle("inventory:open-path", async (_event, targetPath) => {
     if (typeof targetPath !== "string" || !targetPath.trim()) {
       return false;

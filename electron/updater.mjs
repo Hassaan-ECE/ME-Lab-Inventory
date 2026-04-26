@@ -419,6 +419,7 @@ async function normalizeDownloadedInstaller(downloaded, currentManifest) {
 function normalizeManifest(rawManifest, manifestPath, sharedRootPath) {
   const version = normalizeManifestText(rawManifest?.version);
   const installerPath = normalizeManifestText(rawManifest?.installer_path);
+  const sha256 = normalizeManifestText(rawManifest?.sha256).toLowerCase();
 
   if (!version) {
     throw new Error("Update manifest is missing a version.");
@@ -426,13 +427,16 @@ function normalizeManifest(rawManifest, manifestPath, sharedRootPath) {
   if (!installerPath) {
     throw new Error("Update manifest is missing an installer path.");
   }
+  if (!/^[a-f0-9]{64}$/.test(sha256)) {
+    throw new Error("Update manifest must include a valid 64-character SHA-256 checksum.");
+  }
 
   return {
     installerPath: resolveManifestInstallerPath(installerPath, sharedRootPath),
     manifestPath,
     notes: normalizeManifestText(rawManifest?.notes),
     publishedAt: normalizeManifestText(rawManifest?.published_at),
-    sha256: normalizeManifestText(rawManifest?.sha256).toLowerCase(),
+    sha256,
     version,
   };
 }
